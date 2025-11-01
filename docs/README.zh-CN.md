@@ -33,13 +33,13 @@ Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动
 - [6] 设置：修改语言/设备名，清空历史
 - [7] 退出
 
-- 防火墙：若发现/传输异常，请放行 UDP 45845 与本地 TCP。
+- 防火墙：若发现/传输异常，请放行 UDP 45845 以及 TCP 45846（传输端口）。
 
 ## 文件与持久化
 
 - 配置：`~/.glitter/config.json`（语言、设备名）
 - 历史：`~/.glitter/history.jsonl`（每行一条 JSON）
-- 默认下载目录：`~/GlitterDownloads`
+- Windows 默认下载目录：`~/Downloads/GlitterDownloads`，其他系统 `~/GlitterDownloads`
 
 ## 调试
 
@@ -48,4 +48,3 @@ Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动
 ## 许可证
 
 [MIT](../LICENSE)
-

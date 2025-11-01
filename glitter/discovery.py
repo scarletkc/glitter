@@ -104,6 +104,8 @@ class DiscoveryService:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.sendto(b"", ("127.0.0.1", self.port))
+        except KeyboardInterrupt:
+            return
         except OSError:
             pass
 

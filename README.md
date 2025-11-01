@@ -33,13 +33,13 @@ On first run, Glitter asks for language and device name and saves them. Next run
 - [6] Settings: Change language/device name, clear history
 - [7] Quit: Exit the program
 
-- Firewall: Allow UDP port 45845 and local TCP for the app if discovery/transfer is blocked.
+- Firewall: Allow UDP 45845 and TCP 45846 (transfer port) for the app if discovery/transfer is blocked.
 
 ## Files & Persistence
 
 - Config: `~/.glitter/config.json` (language, device name)
 - History: `~/.glitter/history.jsonl` (one JSON per line)
-- Default download folder: `~/GlitterDownloads`
+- Default download folder: `~/Downloads/GlitterDownloads` on Windows, `~/GlitterDownloads` elsewhere
 
 ## Debugging
 
@@ -54,4 +54,3 @@ On first run, Glitter asks for language and device name and saves them. Next run
 ## License
 
 [MIT](./LICENSE)
-

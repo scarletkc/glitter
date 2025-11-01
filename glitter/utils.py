@@ -23,7 +23,13 @@ def ensure_download_dir() -> Path:
     Ensure and return the default download directory for incoming files.
     """
 
-    download_dir = Path.home() / "GlitterDownloads"
+    home = Path.home()
+    if os.name == "nt":
+        downloads_root = home / "Downloads"
+        downloads_root.mkdir(parents=True, exist_ok=True)
+        download_dir = downloads_root / "GlitterDownloads"
+    else:
+        download_dir = home / "GlitterDownloads"
     download_dir.mkdir(parents=True, exist_ok=True)
     return download_dir
 

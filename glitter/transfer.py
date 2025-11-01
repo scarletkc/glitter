@@ -29,6 +29,7 @@ from .security import (
 
 BUFFER_SIZE = 64 * 1024
 PROTOCOL_VERSION = 1
+DEFAULT_TRANSFER_PORT = 45846
 
 # None -> block indefinitely, otherwise seconds to wait during handshake
 HANDSHAKE_TIMEOUT: Optional[float] = None
@@ -104,7 +105,7 @@ class TransferService:
         language: str,
         on_new_request: Callable[[TransferTicket], None],
         on_cancelled_request: Optional[Callable[[TransferTicket], None]] = None,
-        bind_port: int = 0,
+        bind_port: int = DEFAULT_TRANSFER_PORT,
     ) -> None:
         self.device_id = device_id
         self.device_name = device_name
@@ -130,9 +131,29 @@ class TransferService:
         if self._running.is_set():
             return
         self._running.set()
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("", self.bind_port))
+        sock: Optional[socket.socket] = None
+        last_error: Optional[OSError] = None
+        candidates = []
+        if self.bind_port:
+            candidates.append(self.bind_port)
+        candidates.append(0)
+
+        for candidate in candidates:
+            trial = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                trial.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                trial.bind(("", candidate))
+            except OSError as exc:
+                last_error = exc
+                trial.close()
+                continue
+            sock = trial
+            break
+
+        if sock is None:
+            self._running.clear()
+            raise OSError("failed to bind transfer socket") from last_error
+
         sock.listen()
         self._server_socket = sock
         self._accept_thread = threading.Thread(
@@ -196,21 +217,30 @@ class TransferService:
             # Allow ample time for the receiver to review and accept the transfer
             sock.settimeout(HANDSHAKE_TIMEOUT)
             sock.sendall(message.encode("utf-8"))
-            reader = sock.makefile("rb")
             sock.settimeout(0.5)
+            response_buffer = bytearray()
             while True:
                 if cancel_event and cancel_event.is_set():
                     raise TransferCancelled(file_hash)
                 try:
-                    response = _readline(reader)
-                    break
-                except (socket.timeout, TimeoutError) as exc:
+                    chunk = sock.recv(4096)
+                except (socket.timeout, TimeoutError):
                     continue
                 except OSError as exc:
                     message = str(exc).lower()
                     if "timed out" in message:
                         continue
                     raise
+                if not chunk:
+                    raise ConnectionError("connection closed during handshake")
+                response_buffer.extend(chunk)
+                if b"\n" not in response_buffer:
+                    continue
+                line, remainder = response_buffer.split(b"\n", 1)
+                response = line.decode("utf-8")
+                # There should not be any extra data following the handshake response.
+                response_buffer = bytearray(remainder)
+                break
             if response == "DECLINE":
                 return "declined", file_hash
             if not response.startswith("ACCEPT"):
@@ -224,8 +254,8 @@ class TransferService:
                 ) from exc
             session_key = derive_session_key(private_key, receiver_public, nonce)
             cipher = StreamCipher(session_key, nonce)
-            # Once the handshake has succeeded, switch back to blocking mode for data transfer
             sock.settimeout(None)
+            # Once the handshake has succeeded, switch back to blocking mode for data transfer
             bytes_sent = 0
             if progress_cb:
                 progress_cb(bytes_sent, file_size)

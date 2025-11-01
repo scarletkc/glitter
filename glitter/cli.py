@@ -69,10 +69,17 @@ class GlitterApp:
         self._discovery.start()
 
     def stop(self) -> None:
-        if self._discovery:
-            self._discovery.stop()
+        try:
+            if self._discovery:
+                self._discovery.stop()
+        except KeyboardInterrupt:
+            pass
+        finally:
             self._discovery = None
-        self._transfer_service.stop()
+        try:
+            self._transfer_service.stop()
+        except KeyboardInterrupt:
+            pass
 
     # Discovery --------------------------------------------------------
 
@@ -352,6 +359,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
     print(get_message("cancel_hint", language))
     last_progress = {"sent": -1, "total": -1, "time": None}
     progress_shown = {"value": False}
+    handshake_announced = {"value": False}
+    line_width = {"value": 0}
 
     def report_progress(sent: int, total: int) -> None:
         now = time.time()
@@ -363,6 +372,9 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
             and (now - last_time) < 0.1
         ):
             return
+        if not handshake_announced["value"] and last_progress["sent"] < 0:
+            print(get_message("recipient_accepted", language))
+            handshake_announced["value"] = True
         previous_sent = last_progress["sent"]
         delta_bytes = sent - previous_sent if previous_sent >= 0 else 0
         delta_time = now - last_time if last_time not in {None, 0.0} else 0.0
@@ -378,7 +390,10 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
             total=format_size(total),
             rate=format_rate(rate),
         )
-        print("\r" + message, end="", flush=True)
+        if len(message) > line_width["value"]:
+            line_width["value"] = len(message)
+        padding = " " * max(0, line_width["value"] - len(message))
+        print("\r" + message + padding, end="", flush=True)
 
     file_size = file_path.stat().st_size
     result_holder: dict[str, object] = {}
@@ -831,7 +846,10 @@ def run_cli() -> int:
         app.cancel_pending_requests()
         print("\n" + get_message("goodbye", language))
     finally:
-        app.stop()
+        try:
+            app.stop()
+        except KeyboardInterrupt:
+            pass
     return 0
 
 
