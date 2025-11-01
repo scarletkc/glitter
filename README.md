@@ -35,14 +35,23 @@ Glitter provides a **simple, terminal-based** alternative to GUI tools and compl
 
 ## Quick Start
 
+On first run, Glitter asks for language and device name and saves them. Next runs go straight to the main menu.
+
+### PyPI
+
+[Released](https://pypi.org/project/glitter-cli/), recommended to install and run via [pipx](https://pipx.pypa.io/stable/):
+ - apt install pipx  # Debian/Ubuntu
+ - pipx install glitter-cli
+ - glitter
+
+### GitHub
+
 Requirements: [Python 3.9+](https://www.python.org/downloads/) and install [deps](./requirements.txt)
 
 - Linux/macOS/WSL/Windows (PowerShell/CMD) Run: 
   - `git clone https://github.com/scarletkc/glitter.git`
   - `pip install -r requirements.txt`
   - `python3 -m glitter`
-
-On first run, Glitter asks for language and device name and saves them. Next runs go straight to the main menu.
 
 ## Usage
 

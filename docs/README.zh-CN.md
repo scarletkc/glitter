@@ -35,14 +35,23 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ## 快速开始
 
+首次启动会提示选择语言与设备名称并保存。之后启动将直接进入主菜单。
+
+### PyPI
+
+[发布](https://pypi.org/project/glitter-cli/)，推荐使用 [pipx](https://pipx.pypa.io/stable/) 安装与运行：
+ - apt install pipx  # Debian/Ubuntu
+ - pipx install glitter-cli
+ - glitter
+
+### GitHub
+
 要求：[Python 3.9+](https://www.python.org/downloads/)，并安装[依赖](../requirements.txt)
 
 - Linux/macOS/WSL/Windows (PowerShell/CMD) 运行：
   - `git clone https://github.com/scarletkc/glitter.git`
   - `pip install -r requirements.txt`
   - `python3 -m glitter`
-
-首次启动会提示选择语言与设备名称，并保存。之后启动将直接进入主菜单。
 
 ## 用法
 
