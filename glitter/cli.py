@@ -5,12 +5,15 @@ Interactive CLI for the Glitter LAN file transfer tool.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from rich.console import Console
 
@@ -35,6 +38,8 @@ from .utils import (
     format_size,
     seconds_since,
 )
+
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/glitter/__init__.py"
 
 
 class TerminalUI:
@@ -793,7 +798,41 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             ui.print(get_message("invalid_choice", language))
 
 
+def _extract_version_from_source(source: str) -> Optional[str]:
+    match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', source)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _fetch_remote_version(
+    url: str = REMOTE_VERSION_URL, timeout: float = 5.0
+) -> tuple[Optional[str], Optional[str]]:
+    try:
+        with urlopen(url, timeout=timeout) as response:
+            charset = getattr(response.headers, "get_content_charset", lambda: None)() or "utf-8"
+            raw = response.read()
+    except (URLError, OSError) as exc:
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
+    try:
+        text = raw.decode(charset, errors="ignore")
+    except Exception:  # noqa: BLE001
+        text = raw.decode("utf-8", errors="ignore")
+    version = _extract_version_from_source(text)
+    if version is None:
+        return None, "version not found"
+    return version, None
+
+
 def show_updates(ui: TerminalUI, language: str) -> None:
+    ui.print(get_message("current_version", language, version=__version__))
+    remote_version, error = _fetch_remote_version()
+    if remote_version:
+        ui.print(get_message("latest_version", language, version=remote_version))
+    else:
+        ui.print(get_message("update_check_failed", language, error=error or "unknown"))
     ui.print(get_message("updates_info", language))
 
 

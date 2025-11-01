@@ -49,7 +49,7 @@ On first run, Glitter asks for language and device name and saves them. Next run
 - [1] List peers: Show online devices (name/IP/version)
 - [2] Send file: Select a peer and input a path (quotes are allowed)
 - [3] Incoming requests: Review transfer requests; Accept/Decline and choose a save directory
-- [4] Check updates: Open‑source repo link
+- [4] Check updates: Open‑source repo link and latest version info
 - [5] History: Show the latest transfer records
 - [6] Settings: Change language/device name/port/encryption, clear history
 - [7] Quit: Exit the program
