@@ -4,12 +4,16 @@ File transfer server/client logic for Glitter.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import shutil
 import socket
+import tempfile
 import threading
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -60,6 +64,9 @@ class TransferTicket:
     expected_hash: Optional[str] = None
     nonce: Optional[bytes] = None
     peer_public: Optional[int] = None
+    content_type: str = "file"
+    archive_format: Optional[str] = None
+    original_size: Optional[int] = None
     status: str = "pending"
     error: Optional[str] = None
     saved_path: Optional[Path] = None
@@ -195,9 +202,32 @@ class TransferService:
         progress_cb: Optional[Callable[[int, int], None]] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> tuple[str, str]:
-        file_size = file_path.stat().st_size
+        if not file_path.exists():
+            raise FileNotFoundError(f"path does not exist: {file_path}")
+
+        cleanup_path: Optional[Path] = None
+        send_path = file_path
         filename = file_path.name
-        file_hash = compute_file_sha256(file_path)
+        content_type = "directory" if file_path.is_dir() else "file"
+        archive_format: Optional[str] = None
+        original_size: Optional[int] = None
+
+        if content_type == "directory":
+            send_path, original_size = self._create_zip_from_directory(file_path)
+            cleanup_path = send_path
+            archive_format = "zip-store"
+        elif not file_path.is_file():
+            raise ValueError("path must be a file or directory")
+
+        try:
+            file_size = send_path.stat().st_size
+            file_hash = compute_file_sha256(send_path)
+        except Exception:
+            if cleanup_path:
+                with contextlib.suppress(OSError):
+                    cleanup_path.unlink()
+            raise
+
         nonce = random_nonce()
         private_key, public_key = generate_dh_keypair()
         metadata = {
@@ -212,75 +242,85 @@ class TransferService:
             "sha256": file_hash,
             "nonce": encode_bytes(nonce),
             "dh_public": encode_public(public_key),
+            "content_type": content_type,
         }
+        if archive_format:
+            metadata["archive"] = archive_format
+        if original_size is not None:
+            metadata["original_size"] = original_size
         message = json.dumps(metadata, ensure_ascii=False) + "\n"
 
-        with socket.create_connection((target_ip, target_port), timeout=10) as sock:
-            # Allow ample time for the receiver to review and accept the transfer
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, BUFFER_SIZE)
-            sock.settimeout(HANDSHAKE_TIMEOUT)
-            sock.sendall(message.encode("utf-8"))
-            sock.settimeout(0.5)
-            response_buffer = bytearray()
-            while True:
-                if cancel_event and cancel_event.is_set():
-                    raise TransferCancelled(file_hash)
-                try:
-                    chunk = sock.recv(4096)
-                except (socket.timeout, TimeoutError):
-                    continue
-                except OSError as exc:
-                    message = str(exc).lower()
-                    if "timed out" in message:
-                        continue
-                    raise
-                if not chunk:
-                    raise ConnectionError("connection closed during handshake")
-                response_buffer.extend(chunk)
-                if b"\n" not in response_buffer:
-                    continue
-                line, remainder = response_buffer.split(b"\n", 1)
-                response = line.decode("utf-8")
-                # There should not be any extra data following the handshake response.
-                response_buffer = bytearray(remainder)
-                break
-            if response == "DECLINE":
-                return "declined", file_hash
-            if not response.startswith("ACCEPT"):
-                raise RuntimeError(f"unexpected response: {response}")
-            try:
-                _, receiver_payload = response.split(" ", 1)
-                receiver_public = decode_public(receiver_payload)
-            except Exception as exc:
-                raise RuntimeError(
-                    "secure handshake failed: remote client may be outdated"
-                ) from exc
-            session_key = derive_session_key(private_key, receiver_public, nonce)
-            cipher = StreamCipher(session_key, nonce)
-            sock.settimeout(None)
-            # Once the handshake has succeeded, switch back to blocking mode for data transfer
-            bytes_sent = 0
-            if progress_cb:
-                progress_cb(bytes_sent, file_size)
-            with file_path.open("rb") as file_handle:
+        try:
+            with socket.create_connection((target_ip, target_port), timeout=10) as sock:
+                # Allow ample time for the receiver to review and accept the transfer
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, BUFFER_SIZE)
+                sock.settimeout(HANDSHAKE_TIMEOUT)
+                sock.sendall(message.encode("utf-8"))
+                sock.settimeout(0.5)
+                response_buffer = bytearray()
                 while True:
                     if cancel_event and cancel_event.is_set():
                         raise TransferCancelled(file_hash)
-                    chunk = file_handle.read(BUFFER_SIZE)
+                    try:
+                        chunk = sock.recv(4096)
+                    except (socket.timeout, TimeoutError):
+                        continue
+                    except OSError as exc:
+                        message = str(exc).lower()
+                        if "timed out" in message:
+                            continue
+                        raise
                     if not chunk:
-                        break
-                    encrypted = cipher.process(chunk)
-                    sock.sendall(memoryview(encrypted))
-                    bytes_sent += len(chunk)
-                    if progress_cb:
-                        progress_cb(bytes_sent, file_size)
-            # Clean shutdown
-            try:
-                sock.shutdown(socket.SHUT_WR)
-            except OSError:
-                pass
-            return "accepted", file_hash
+                        raise ConnectionError("connection closed during handshake")
+                    response_buffer.extend(chunk)
+                    if b"\n" not in response_buffer:
+                        continue
+                    line, remainder = response_buffer.split(b"\n", 1)
+                    response = line.decode("utf-8")
+                    # There should not be any extra data following the handshake response.
+                    response_buffer = bytearray(remainder)
+                    break
+                if response == "DECLINE":
+                    return "declined", file_hash
+                if not response.startswith("ACCEPT"):
+                    raise RuntimeError(f"unexpected response: {response}")
+                try:
+                    _, receiver_payload = response.split(" ", 1)
+                    receiver_public = decode_public(receiver_payload)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "secure handshake failed: remote client may be outdated"
+                    ) from exc
+                session_key = derive_session_key(private_key, receiver_public, nonce)
+                cipher = StreamCipher(session_key, nonce)
+                sock.settimeout(None)
+                # Once the handshake has succeeded, switch back to blocking mode for data transfer
+                bytes_sent = 0
+                if progress_cb:
+                    progress_cb(bytes_sent, file_size)
+                with send_path.open("rb") as file_handle:
+                    while True:
+                        if cancel_event and cancel_event.is_set():
+                            raise TransferCancelled(file_hash)
+                        chunk = file_handle.read(BUFFER_SIZE)
+                        if not chunk:
+                            break
+                        encrypted = cipher.process(chunk)
+                        sock.sendall(memoryview(encrypted))
+                        bytes_sent += len(chunk)
+                        if progress_cb:
+                            progress_cb(bytes_sent, file_size)
+                # Clean shutdown
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+                return "accepted", file_hash
+        finally:
+            if cleanup_path:
+                with contextlib.suppress(OSError):
+                    cleanup_path.unlink()
 
     def update_identity(self, device_name: str, language: str) -> None:
         self.device_name = device_name
@@ -344,6 +384,15 @@ class TransferService:
             file_hash = metadata.get("sha256")
             nonce_encoded = metadata.get("nonce")
             peer_public_encoded = metadata.get("dh_public")
+            content_type = metadata.get("content_type") or "file"
+            if content_type not in {"file", "directory"}:
+                content_type = "file"
+            archive_format = metadata.get("archive") if isinstance(metadata.get("archive"), str) else None
+            original_size_value = metadata.get("original_size")
+            try:
+                original_size = int(original_size_value)
+            except (TypeError, ValueError):
+                original_size = None
 
             if not file_hash or not nonce_encoded or not peer_public_encoded:
                 try:
@@ -373,6 +422,9 @@ class TransferService:
                 expected_hash=file_hash,
                 nonce=nonce,
                 peer_public=peer_public,
+                content_type=content_type,
+                archive_format=archive_format,
+                original_size=original_size,
             )
             with self._pending_lock:
                 self._pending[request_id] = ticket
@@ -439,6 +491,16 @@ class TransferService:
                 self.remove_ticket(request_id)
                 return
 
+            if ticket.content_type == "directory" and ticket.archive_format not in {"zip-store"}:
+                ticket.status = "failed"
+                ticket.error = "unsupported archive format"
+                try:
+                    _sendline(conn, "DECLINE")
+                except OSError:
+                    pass
+                self.remove_ticket(request_id)
+                return
+
             receiver_private, receiver_public = generate_dh_keypair()
             session_key = derive_session_key(receiver_private, ticket.peer_public, ticket.nonce)
             cipher = StreamCipher(session_key, ticket.nonce)
@@ -453,13 +515,41 @@ class TransferService:
                 return
 
             dest_path = self._prepare_destination(destination, filename)
+            temp_archive: Optional[Path] = None
             try:
-                self._receive_file(reader, dest_path, filesize, ticket, cipher)
+                output_path = dest_path
+                if ticket.content_type == "directory":
+                    fd, temp_name = tempfile.mkstemp(prefix="glitter-recv-", suffix=".zip")
+                    os.close(fd)
+                    temp_archive = Path(temp_name)
+                    output_path = temp_archive
+                self._receive_file(reader, output_path, filesize, ticket, cipher)
+                if ticket.content_type == "directory":
+                    try:
+                        self._extract_directory_archive(output_path, dest_path)
+                    except Exception:
+                        with contextlib.suppress(OSError):
+                            if dest_path.exists():
+                                shutil.rmtree(dest_path)
+                        raise
+                    finally:
+                        if temp_archive:
+                            with contextlib.suppress(OSError):
+                                temp_archive.unlink()
+                    ticket.saved_path = dest_path
+                else:
+                    ticket.saved_path = dest_path
                 ticket.status = "completed"
-                ticket.saved_path = dest_path
             except Exception as exc:  # noqa: BLE001
                 ticket.status = "failed"
                 ticket.error = str(exc)
+                if temp_archive:
+                    with contextlib.suppress(OSError):
+                        temp_archive.unlink()
+                if ticket.content_type == "directory":
+                    with contextlib.suppress(Exception):
+                        if dest_path.exists():
+                            shutil.rmtree(dest_path)
             finally:
                 self.remove_ticket(request_id)
 
@@ -500,3 +590,60 @@ class TransferService:
             if not candidate.exists():
                 return candidate
             counter += 1
+
+    def _create_zip_from_directory(self, directory: Path) -> tuple[Path, int]:
+        fd, temp_name = tempfile.mkstemp(prefix="glitter-send-", suffix=".zip")
+        os.close(fd)
+        temp_path = Path(temp_name)
+        total_bytes = 0
+        added_dirs: set[str] = set()
+
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+            for dirpath, dirnames, filenames in os.walk(directory):
+                current = Path(dirpath)
+                relative = current.relative_to(directory)
+                if relative != Path("."):
+                    self._add_zip_directory_entry(archive, added_dirs, relative)
+                if not dirnames and not filenames:
+                    self._add_zip_directory_entry(archive, added_dirs, relative)
+                for name in filenames:
+                    file_path = current / name
+                    rel_name = relative / name if relative != Path(".") else Path(name)
+                    archive.write(file_path, arcname=self._zip_arcname(rel_name))
+                    try:
+                        total_bytes += file_path.stat().st_size
+                    except OSError:
+                        pass
+
+        return Path(temp_path), total_bytes
+
+    def _extract_directory_archive(self, archive_path: Path, destination: Path) -> None:
+        destination.mkdir(parents=True, exist_ok=False)
+        target_root = destination.resolve()
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.infolist():
+                name = member.filename
+                if not name:
+                    continue
+                resolved = (destination / name).resolve(strict=False)
+                if target_root not in resolved.parents and resolved != target_root:
+                    raise ValueError("archive member escapes destination directory")
+            archive.extractall(destination)
+
+    @staticmethod
+    def _zip_arcname(path: Path) -> str:
+        return str(path).replace(os.sep, "/")
+
+    @staticmethod
+    def _add_zip_directory_entry(
+        archive: zipfile.ZipFile, added: set[str], relative: Path
+    ) -> None:
+        if relative == Path("."):
+            return
+        arc = TransferService._zip_arcname(relative)
+        if not arc.endswith("/"):
+            arc += "/"
+        if arc in added:
+            return
+        archive.writestr(zipfile.ZipInfo(arc), b"")
+        added.add(arc)

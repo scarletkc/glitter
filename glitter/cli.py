@@ -192,10 +192,11 @@ class GlitterApp:
             return
         for ticket in tickets:
             if self._transfer_service.decline_request(ticket.request_id):
+                display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
                 self.log_history(
                     direction="receive",
                     status=status,
-                    filename=ticket.filename,
+                    filename=display_name,
                     size=ticket.filesize,
                     sha256=ticket.expected_hash,
                     remote_name=ticket.sender_name,
@@ -248,10 +249,11 @@ class GlitterApp:
     def _handle_incoming_request(self, ticket: TransferTicket) -> None:
         with self._incoming_lock:
             self._incoming_counter += 1
+        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
         message = get_message(
             "incoming_notice",
             self.language,
-            filename=ticket.filename,
+            filename=display_name,
             size=ticket.filesize,
             name=ticket.sender_name,
         )
@@ -269,17 +271,18 @@ class GlitterApp:
         print(get_message("waiting_for_decision", self.language), flush=True)
 
     def _handle_request_cancelled(self, ticket: TransferTicket) -> None:
+        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
         message = get_message(
             "incoming_cancelled",
             self.language,
-            filename=ticket.filename,
+            filename=display_name,
             name=ticket.sender_name,
         )
         print(f"\n{message}\n", flush=True)
         self.log_history(
             direction="receive",
             status="cancelled",
-            filename=ticket.filename,
+            filename=display_name,
             size=ticket.filesize,
             sha256=ticket.expected_hash,
             remote_name=ticket.sender_name,
@@ -414,14 +417,15 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
             print(get_message("operation_cancelled", language))
             return
         file_path = Path(file_input).expanduser()
-        if file_path.exists() and file_path.is_file():
+        if file_path.exists() and (file_path.is_file() or file_path.is_dir()):
             break
         print(get_message("file_not_found", language))
+    display_name = file_path.name + ("/" if file_path.is_dir() else "")
     print(
         get_message(
             "sending",
             language,
-            filename=file_path.name,
+            filename=display_name,
             name=peer.name,
             ip=peer.ip,
         )
@@ -465,7 +469,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         padding = " " * max(0, line_width["value"] - len(message))
         print("\r" + message + padding, end="", flush=True)
 
-    file_size = file_path.stat().st_size
+    file_size = file_path.stat().st_size if file_path.is_file() else 0
+    transfer_label = display_name
     result_holder: dict[str, object] = {}
     cancel_event = threading.Event()
 
@@ -496,6 +501,7 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         result_holder.setdefault("cancelled", True)
 
     file_hash = result_holder.get("hash") if isinstance(result_holder.get("hash"), str) else None
+    final_size = last_progress["total"] if last_progress["total"] >= 0 else file_size
     if progress_shown["value"]:
         print()
 
@@ -504,8 +510,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         app.log_history(
             direction="send",
             status="cancelled",
-            filename=file_path.name,
-            size=file_size,
+            filename=transfer_label,
+            size=final_size,
             sha256=file_hash,
             remote_name=peer.name,
             remote_ip=peer.ip,
@@ -522,8 +528,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         app.log_history(
             direction="send",
             status=f"error: {exc}",
-            filename=file_path.name,
-            size=file_size,
+            filename=transfer_label,
+            size=final_size,
             sha256=file_hash,
             remote_name=peer.name,
             remote_ip=peer.ip,
@@ -540,8 +546,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         app.log_history(
             direction="send",
             status="declined",
-            filename=file_path.name,
-            size=file_size,
+            filename=transfer_label,
+            size=final_size,
             sha256=file_hash,
             remote_name=peer.name,
             remote_ip=peer.ip,
@@ -554,8 +560,8 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
         app.log_history(
             direction="send",
             status="completed",
-            filename=file_path.name,
-            size=file_size,
+            filename=transfer_label,
+            size=final_size,
             sha256=file_hash,
             remote_name=peer.name,
             remote_ip=peer.ip,
@@ -573,11 +579,12 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
         return
     app.reset_incoming_count()
     for index, ticket in enumerate(tickets, start=1):
+        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
         message = get_message(
             "pending_entry",
             language,
             index=index,
-            filename=ticket.filename,
+            filename=display_name,
             size=ticket.filesize,
             name=ticket.sender_name,
         )
@@ -609,6 +616,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
             break
         print(get_message("invalid_choice", language))
     ticket = tickets[idx]
+    display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
     while True:
         action = input(get_message("prompt_accept", language)).strip().lower()
         if not action:
@@ -634,7 +642,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
         if not accepted_ticket:
             print(get_message("invalid_choice", language))
             return
-        print(get_message("receive_started", language, filename=ticket.filename))
+        print(get_message("receive_started", language, filename=display_name))
         wait_for_completion(accepted_ticket, language)
         if accepted_ticket.status == "completed" and accepted_ticket.saved_path:
             print(
@@ -647,7 +655,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
             app.log_history(
                 direction="receive",
                 status="completed",
-                filename=ticket.filename,
+                filename=display_name,
                 size=ticket.filesize,
                 sha256=ticket.expected_hash,
                 remote_name=ticket.sender_name,
@@ -661,7 +669,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
             app.log_history(
                 direction="receive",
                 status=accepted_ticket.error or "failed",
-                filename=ticket.filename,
+                filename=display_name,
                 size=ticket.filesize,
                 sha256=ticket.expected_hash,
                 remote_name=ticket.sender_name,
@@ -675,7 +683,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
             app.log_history(
                 direction="receive",
                 status=accepted_ticket.status,
-                filename=ticket.filename,
+                filename=display_name,
                 size=ticket.filesize,
                 sha256=ticket.expected_hash,
                 remote_name=ticket.sender_name,
@@ -690,7 +698,7 @@ def handle_requests_cli(app: GlitterApp, language: str) -> None:
             app.log_history(
                 direction="receive",
                 status="declined",
-                filename=ticket.filename,
+                filename=display_name,
                 size=ticket.filesize,
                 sha256=ticket.expected_hash,
                 remote_name=ticket.sender_name,

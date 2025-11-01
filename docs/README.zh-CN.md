@@ -7,6 +7,7 @@ Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动
 - UDP 广播 + 智能回复的同伴发现
 - 传输加密（DH 密钥交换 + 流加密）
 - 传输完成后做 SHA‑256 完整性校验
+- 支持目录传输：自动打包为零压缩 ZIP，无感发送
 - 实时传输进度与速率
 - 历史记录保存到用户目录（JSONL）
 - 设置语言与设备名，支持清空历史
@@ -34,12 +35,12 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ## 快速开始
 
-要求：[Python 3.9+](https://www.python.org/downloads/)、[requirements.txt](../requirements.txt)
+要求：[Python 3.9+](https://www.python.org/downloads/)，并安装[依赖](../requirements.txt)
 
 - Linux/macOS/WSL/Windows (PowerShell/CMD) 运行：
   - `git clone https://github.com/scarletkc/glitter.git`
   - `pip install -r requirements.txt`
-  - `python -m glitter.glitter`
+  - `python3 -m glitter`
 
 首次启动会提示选择语言与设备名称，并保存。之后启动将直接进入主菜单。
 
