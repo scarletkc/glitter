@@ -13,6 +13,25 @@ Glitter is a cross‑platform, terminal‑based tool for sending files over a lo
 
 Chinese docs: see [README.zh-CN.md](./docs/README.zh-CN.md).
 
+## Why Glitter?
+
+Glitter provides a **simple, terminal-based** alternative to GUI tools and complex protocols:
+
+| Tool | Pros | Cons | Glitter Advantage |
+|------|------|------|-------------------|
+| **LocalSend** | Beautiful GUI, cross-platform | Requires GUI environment, ~100MB+ install | **CLI-first**: works via SSH, lightweight (~50KB), scriptable |
+| **Magic Wormhole** | Simple one-time codes | Requires relay server, single-file only | **LAN-direct**: no internet needed, auto-discovery, no codes to type |
+| **SFTP/SCP** | Universal, encrypted | Needs SSH server setup, manual IP entry | **Zero-config**: auto-discovers peers, no server setup |
+| **rsync** | Powerful sync engine | Complex syntax, requires remote shell access | **Interactive**: menu-driven, progress bars, history tracking |
+| **HTTP file server** | Simple `python -m http.server` | No encryption, manual URL sharing | **Secure**: DH key exchange + encryption, peer selection UI |
+
+**Use Glitter when you want:**
+- Quick file sharing on LAN without leaving the terminal
+- Auto-discovery instead of typing IPs
+- Encrypted transfers without complex SSH setup
+- Minimal dependencies (pure Python, no external binaries)
+- Transfer history and bilingual UI
+
 ## Quick Start
 
 Requirements: [Python 3.9+](https://www.python.org/downloads/), [requirements.txt](./requirements.txt)
