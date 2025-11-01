@@ -1,16 +1,24 @@
 """
-Interactive CLI for the Glitter LAN file transfer tool.
+Interactive CLI for the Glitter LAN file transfer tool using prompt_toolkit.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
-import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.styles import Style
 
 from . import __version__
 from .config import AppConfig, load_config, save_config
@@ -25,18 +33,43 @@ from .history import (
 )
 from .language import LANGUAGES, get_message
 from .transfer import DEFAULT_TRANSFER_PORT, TransferCancelled, TransferService, TransferTicket
-from .utils import (
-    default_device_name,
-    ensure_download_dir,
-    flush_input_buffer,
-    format_rate,
-    format_size,
-    seconds_since,
-)
+from .utils import default_device_name, ensure_download_dir, format_rate, format_size, seconds_since
+
+
+@dataclass
+class ProgressState:
+    mode: str  # "send" or "receive"
+    filename: str
+    total: int
+    transferred: int = 0
+    rate: float = 0.0
+    status: str = ""
+
+
+@dataclass
+class UIState:
+    view: str = "menu"
+    title: str = ""
+    body_lines: list[str] = field(default_factory=list)
+    footer: str = ""
+    status: str = ""
+    message_log: list[str] = field(default_factory=list)
+    progress: Optional[ProgressState] = None
+
+    def set_view(self, view: str, title: str, lines: list[str], footer: str) -> None:
+        self.view = view
+        self.title = title
+        self.body_lines = lines
+        self.footer = footer
+
+    def add_message(self, message: str, limit: int = 5) -> None:
+        self.message_log.append(message)
+        if len(self.message_log) > limit:
+            self.message_log = self.message_log[-limit:]
 
 
 class GlitterApp:
-    """Orchestrates discovery, transfers, and CLI prompts."""
+    """Orchestrates discovery, transfers, and integration with the UI layer."""
 
     def __init__(
         self,
@@ -67,6 +100,7 @@ class GlitterApp:
         self._incoming_lock = threading.Lock()
         self._incoming_counter = 0
         self._history_lock = threading.Lock()
+        self._ui: Optional["PromptToolkitUI"] = None
 
     def _create_transfer_service(self, bind_port: int, allow_fallback: bool) -> TransferService:
         return TransferService(
@@ -79,6 +113,9 @@ class GlitterApp:
             allow_ephemeral_fallback=allow_fallback,
             encryption_enabled=self._encryption_enabled,
         )
+
+    def attach_ui(self, ui: "PromptToolkitUI") -> None:
+        self._ui = ui
 
     @property
     def transfer_port(self) -> int:
@@ -163,14 +200,10 @@ class GlitterApp:
         except KeyboardInterrupt:
             pass
 
-    # Discovery --------------------------------------------------------
-
     def list_peers(self) -> list[PeerInfo]:
         if not self._discovery:
             return []
         return self._discovery.get_peers()
-
-    # Transfers --------------------------------------------------------
 
     def send_file(
         self,
@@ -248,8 +281,6 @@ class GlitterApp:
         with self._history_lock:
             append_record(record)
 
-    # Internal callbacks -----------------------------------------------
-
     def update_identity(self, device_name: str, language: str) -> None:
         self.device_name = device_name
         self.language = language
@@ -260,48 +291,12 @@ class GlitterApp:
     def _handle_incoming_request(self, ticket: TransferTicket) -> None:
         with self._incoming_lock:
             self._incoming_counter += 1
-        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-        message = get_message(
-            "incoming_notice",
-            self.language,
-            filename=display_name,
-            size=ticket.filesize,
-            name=ticket.sender_name,
-        )
-        print(f"\n{message}\n", flush=True)
-        if ticket.sender_version and ticket.sender_version != __version__:
-            print(
-                get_message(
-                    "incoming_version_warning",
-                    self.language,
-                    version=ticket.sender_version,
-                    current=__version__,
-                ),
-                flush=True,
-            )
-        print(get_message("waiting_for_decision", self.language), flush=True)
+        if self._ui:
+            self._ui.notify_incoming_request(ticket)
 
     def _handle_request_cancelled(self, ticket: TransferTicket) -> None:
-        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-        message = get_message(
-            "incoming_cancelled",
-            self.language,
-            filename=display_name,
-            name=ticket.sender_name,
-        )
-        print(f"\n{message}\n", flush=True)
-        self.log_history(
-            direction="receive",
-            status="cancelled",
-            filename=display_name,
-            size=ticket.filesize,
-            sha256=ticket.expected_hash,
-            remote_name=ticket.sender_name,
-            remote_ip=ticket.sender_ip,
-            source_path=None,
-            target_path=None,
-            remote_version=ticket.sender_version,
-        )
+        if self._ui:
+            self._ui.notify_request_cancelled(ticket)
 
     def incoming_count(self) -> int:
         with self._incoming_lock:
@@ -312,687 +307,758 @@ class GlitterApp:
             self._incoming_counter = 0
 
 
-def prompt_language_choice(default: str, allow_cancel: bool = False) -> Optional[str]:
-    while True:
-        print(get_message("select_language", default))
-        for code, label in LANGUAGES.items():
-            print(f"  {code} - {label}")
-        try:
-            choice_raw = input(get_message("prompt_language_choice", default, default=default))
-        except (KeyboardInterrupt, EOFError):
-            print()
-            if allow_cancel:
-                return None
-            raise SystemExit(0)
-        choice = choice_raw.strip().lower()
-        if not choice:
-            return default
-        if choice in LANGUAGES:
-            return choice
-        print(get_message("invalid_choice", default))
+class PromptToolkitUI:
+    """prompt_toolkit-driven interface for Glitter."""
 
+    def __init__(self, app: GlitterApp, config: AppConfig, language: str) -> None:
+        self._app = app
+        self._config = config
+        self._language = language
+        self._state = UIState()
+        self._prompt_session = PromptSession()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._progress_lock = threading.Lock()
 
-def choose_language() -> str:
-    result = prompt_language_choice("en", allow_cancel=False)
-    return result or "en"
+        self._header_control = FormattedTextControl(self._render_header)
+        self._body_control = FormattedTextControl(self._render_body)
+        self._status_control = FormattedTextControl(self._render_status)
+        self._footer_control = FormattedTextControl(self._render_footer)
 
-
-def prompt_device_name(
-    language: str, allow_cancel: bool = False, default_name: Optional[str] = None
-) -> Optional[str]:
-    default_name = default_name or default_device_name()
-    prompt = get_message("prompt_device_name", language, default=default_name)
-    try:
-        name_input = input(prompt)
-    except (KeyboardInterrupt, EOFError):
-        print()
-        if allow_cancel:
-            return None
-        raise SystemExit(0)
-    name = name_input.strip()
-    if not name:
-        return default_name
-    return name
-
-
-def display_menu(language: str, has_pending: int) -> None:
-    print()
-    print(get_message("menu_header", language))
-    text = get_message("menu_options", language)
-    if has_pending:
-        text += get_message("menu_pending", language, count=has_pending)
-    print(text)
-
-
-def list_peers_cli(app: GlitterApp, language: str) -> None:
-    peers = app.list_peers()
-    if not peers:
-        print(get_message("no_peers", language))
-        return
-    now = time.time()
-    for index, peer in enumerate(peers, start=1):
-        seconds = seconds_since(peer.last_seen)
-        message = get_message(
-            "peer_entry",
-            language,
-            index=index,
-            name=peer.name,
-            ip=peer.ip,
-            seconds=seconds,
-            version=peer.version,
+        root = HSplit(
+            [
+                Window(content=self._header_control, height=1, style="class:header"),
+                Window(height=1, char="─", style="class:divider"),
+                Window(content=self._body_control, style="class:body"),
+                Window(height=1, char="─", style="class:divider"),
+                Window(content=self._status_control, height=1, style="class:status"),
+                Window(content=self._footer_control, height=1, style="class:footer"),
+            ]
         )
-        print(message)
-        if peer.version != __version__:
-            print(
-                get_message(
-                    "peer_version_warning",
-                    language,
-                    version=peer.version,
-                    current=__version__,
-                )
-            )
 
+        bindings = KeyBindings()
 
-def send_file_cli(app: GlitterApp, language: str) -> None:
-    peers = app.list_peers()
-    if not peers:
-        print(get_message("no_peers", language))
-        return
-    list_peers_cli(app, language)
-    while True:
-        choice = input(get_message("prompt_peer_index", language)).strip()
-        if not choice:
-            print(get_message("operation_cancelled", language))
+        @bindings.add("c-c")
+        @bindings.add("q")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.exit(result="quit")
+
+        @bindings.add("escape")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.show_menu())
+
+        @bindings.add("1")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.show_peers())
+
+        @bindings.add("2")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.start_send_flow())
+
+        @bindings.add("3")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.handle_requests())
+
+        @bindings.add("4")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.show_updates())
+
+        @bindings.add("5")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.show_history())
+
+        @bindings.add("6")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.create_background_task(self.open_settings())
+
+        @bindings.add("7")
+        def _(event) -> None:  # noqa: ANN001
+            event.app.exit(result="quit")
+
+        style = Style.from_dict(
+            {
+                "header": "bg:#303446 #f2d5cf",
+                "divider": "bg:#303446 #51576d",
+                "body": "bg:#303446 #c6d0f5",
+                "status": "bg:#303446 #e5c890",
+                "footer": "bg:#303446 #a6d189",
+            }
+        )
+
+        self._application = Application(
+            layout=Layout(root),
+            key_bindings=bindings,
+            full_screen=True,
+            refresh_interval=0.2,
+            mouse_support=False,
+            style=style,
+        )
+
+        self._state.set_view(
+            "menu",
+            get_message("menu_header", self._language),
+            self._menu_lines(),
+            get_message("prompt_choice", self._language),
+        )
+
+    async def run(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        result = await self._application.run_async()
+        if result == "quit":
+            self._app.cancel_pending_requests()
+
+    def _menu_lines(self) -> list[str]:
+        base = get_message("menu_options", self._language)
+        pending = len(self._app.pending_requests())
+        if pending:
+            base += get_message("menu_pending", self._language, count=pending)
+        return [base]
+
+    def _encryption_label(self) -> str:
+        key = "settings_encryption_on" if self._app.encryption_enabled else "settings_encryption_off"
+        return get_message(key, self._language)
+
+    def _render_header(self) -> list[tuple[str, str]]:
+        pending = len(self._app.pending_requests())
+        text = get_message(
+            "menu_status",
+            self._language,
+            version=__version__,
+            device=self._app.device_name,
+            port=self._app.transfer_port,
+            encryption=self._encryption_label(),
+            pending=pending,
+        )
+        return [("class:header", text)]
+
+    def _render_body(self) -> list[tuple[str, str]]:
+        lines = list(self._state.body_lines)
+        if self._state.progress:
+            progress = self._state.progress
+            percent = 0.0 if progress.total == 0 else (progress.transferred / progress.total) * 100
+            progress_line = f"{progress.mode.title()} {progress.filename} — {format_size(progress.transferred)} / {format_size(progress.total)} ({percent:.1f}%)"
+            if progress.rate > 0:
+                progress_line += f"  {format_rate(progress.rate)}/s"
+            if progress.status:
+                progress_line += f"  [{progress.status}]"
+            lines.append("")
+            lines.append(progress_line)
+        if self._state.message_log:
+            lines.append("")
+            lines.append("Messages:")
+            lines.extend(self._state.message_log)
+        if not lines:
+            lines = [" "]
+        joined = "\n".join(lines)
+        return [("class:body", joined)]
+
+    def _render_status(self) -> list[tuple[str, str]]:
+        return [("class:status", self._state.status or " ")]
+
+    def _render_footer(self) -> list[tuple[str, str]]:
+        footer = self._state.footer or get_message("menu_options", self._language)
+        return [("class:footer", footer)]
+
+    def _invalidate(self) -> None:
+        self._application.invalidate()
+
+    def notify_incoming_request(self, ticket: TransferTicket) -> None:
+        if not self._loop:
             return
-        if not choice.isdigit():
-            print(get_message("invalid_choice", language))
-            continue
-        idx = int(choice) - 1
-        if 0 <= idx < len(peers):
-            break
-        print(get_message("invalid_choice", language))
-    peer = peers[idx]
-    if peer.version != __version__:
-        print(
-            get_message(
-                "version_mismatch_send",
-                language,
-                version=peer.version,
-                current=__version__,
-            )
-        )
-    while True:
-        raw_input_path = input(get_message("prompt_file_path", language))
-        file_input = raw_input_path.strip().strip('"').strip("'")
-        if not file_input:
-            print(get_message("operation_cancelled", language))
-            return
-        file_path = Path(file_input).expanduser()
-        if file_path.exists() and (file_path.is_file() or file_path.is_dir()):
-            break
-        print(get_message("file_not_found", language))
-    display_name = file_path.name + ("/" if file_path.is_dir() else "")
-    print(
-        get_message(
-            "sending",
-            language,
-            filename=display_name,
-            name=peer.name,
-            ip=peer.ip,
-        )
-    )
-    print(get_message("waiting_recipient", language))
-    print(get_message("cancel_hint", language))
-    last_progress = {"sent": -1, "total": -1, "time": None}
-    throttle = {"min_interval": 0.2, "min_bytes": 1 * 1024 * 1024}
-    progress_shown = {"value": False}
-    handshake_announced = {"value": False}
-    line_width = {"value": 0}
+        asyncio.run_coroutine_threadsafe(self._async_notify_incoming(ticket), self._loop)
 
-    def report_progress(sent: int, total: int) -> None:
-        now = time.time()
-        last_time = last_progress["time"]
-        if sent != total and last_time is not None:
-            if (now - last_time) < throttle["min_interval"]:
-                prev = last_progress["sent"]
-                if prev >= 0 and (sent - prev) < throttle["min_bytes"]:
-                    return
-        if not handshake_announced["value"] and last_progress["sent"] < 0:
-            print(get_message("recipient_accepted", language))
-            handshake_announced["value"] = True
-        previous_sent = last_progress["sent"]
-        delta_bytes = sent - previous_sent if previous_sent >= 0 else 0
-        delta_time = now - last_time if last_time not in {None, 0.0} else 0.0
-        rate = delta_bytes / delta_time if delta_time > 0 else 0.0
-        last_progress["sent"] = sent
-        last_progress["total"] = total
-        last_progress["time"] = now
-        progress_shown["value"] = True
-        message = get_message(
-            "progress_line",
-            language,
-            transferred=format_size(sent),
-            total=format_size(total),
-            rate=format_rate(rate),
-        )
-        if len(message) > line_width["value"]:
-            line_width["value"] = len(message)
-        padding = " " * max(0, line_width["value"] - len(message))
-        print("\r" + message + padding, end="", flush=True)
-
-    file_size = file_path.stat().st_size if file_path.is_file() else 0
-    transfer_label = display_name
-    result_holder: dict[str, object] = {}
-    cancel_event = threading.Event()
-
-    def worker() -> None:
-        try:
-            result, file_hash = app.send_file(
-                peer,
-                file_path,
-                progress_cb=report_progress,
-                cancel_event=cancel_event,
-            )
-            result_holder["result"] = result
-            result_holder["hash"] = file_hash
-        except TransferCancelled as exc:
-            result_holder["cancelled"] = True
-            result_holder["hash"] = getattr(exc, "file_hash", None)
-        except Exception as exc:  # noqa: BLE001
-            result_holder["exception"] = exc
-
-    thread = threading.Thread(target=worker, name="glitter-send", daemon=True)
-    thread.start()
-    try:
-        while thread.is_alive():
-            thread.join(timeout=0.1)
-    except KeyboardInterrupt:
-        cancel_event.set()
-        thread.join()
-        result_holder.setdefault("cancelled", True)
-
-    file_hash = result_holder.get("hash") if isinstance(result_holder.get("hash"), str) else None
-    final_size = last_progress["total"] if last_progress["total"] >= 0 else file_size
-    if progress_shown["value"]:
-        print()
-
-    if result_holder.get("cancelled"):
-        print(get_message("send_cancelled", language))
-        app.log_history(
-            direction="send",
-            status="cancelled",
-            filename=transfer_label,
-            size=final_size,
-            sha256=file_hash,
-            remote_name=peer.name,
-            remote_ip=peer.ip,
-            source_path=file_path,
-            target_path=None,
-            remote_version=peer.version,
-        )
-        flush_input_buffer()
-        return
-
-    if "exception" in result_holder:
-        exc = result_holder["exception"]
-        print(get_message("send_failed", language, error=exc))
-        app.log_history(
-            direction="send",
-            status=f"error: {exc}",
-            filename=transfer_label,
-            size=final_size,
-            sha256=file_hash,
-            remote_name=peer.name,
-            remote_ip=peer.ip,
-            source_path=file_path,
-            target_path=None,
-            remote_version=peer.version,
-        )
-        flush_input_buffer()
-        return
-
-    result = result_holder.get("result")
-    if result == "declined":
-        print(get_message("send_declined", language))
-        app.log_history(
-            direction="send",
-            status="declined",
-            filename=transfer_label,
-            size=final_size,
-            sha256=file_hash,
-            remote_name=peer.name,
-            remote_ip=peer.ip,
-            source_path=file_path,
-            target_path=None,
-            remote_version=peer.version,
-        )
-    else:
-        print(get_message("send_success", language))
-        app.log_history(
-            direction="send",
-            status="completed",
-            filename=transfer_label,
-            size=final_size,
-            sha256=file_hash,
-            remote_name=peer.name,
-            remote_ip=peer.ip,
-            source_path=file_path,
-            target_path=None,
-            remote_version=peer.version,
-        )
-    flush_input_buffer()
-
-
-def handle_requests_cli(app: GlitterApp, language: str) -> None:
-    tickets = app.pending_requests()
-    if not tickets:
-        print(get_message("no_pending", language))
-        return
-    app.reset_incoming_count()
-    for index, ticket in enumerate(tickets, start=1):
+    async def _async_notify_incoming(self, ticket: TransferTicket) -> None:
         display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
         message = get_message(
-            "pending_entry",
-            language,
-            index=index,
+            "incoming_notice",
+            self._language,
             filename=display_name,
             size=ticket.filesize,
             name=ticket.sender_name,
         )
-        if app.debug:
-            message += get_message(
-                "pending_debug_suffix",
-                language,
-                request_id=ticket.request_id,
-            )
-        print(message)
-        if ticket.sender_version and ticket.sender_version != __version__:
-            print(
+        self._state.add_message(message)
+        self._state.status = get_message("waiting_for_decision", self._language)
+        self._invalidate()
+
+    def notify_request_cancelled(self, ticket: TransferTicket) -> None:
+        if not self._loop:
+            return
+        asyncio.run_coroutine_threadsafe(self._async_request_cancelled(ticket), self._loop)
+
+    async def _async_request_cancelled(self, ticket: TransferTicket) -> None:
+        display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
+        message = get_message(
+            "incoming_cancelled",
+            self._language,
+            filename=display_name,
+            name=ticket.sender_name,
+        )
+        self._state.add_message(message)
+        self._state.status = message
+        self._invalidate()
+
+    def _set_view(self, view: str, title: str, lines: list[str], footer: Optional[str] = None) -> None:
+        footer_text = footer or ""
+        self._state.set_view(view, title, lines, footer_text)
+        self._invalidate()
+
+    async def show_menu(self) -> None:
+        self._set_view(
+            "menu",
+            get_message("menu_header", self._language),
+            self._menu_lines(),
+            get_message("prompt_choice", self._language),
+        )
+
+    async def show_peers(self) -> None:
+        peers = self._app.list_peers()
+        if not peers:
+            lines = [get_message("no_peers", self._language)]
+        else:
+            lines = [get_message("peer_list_header", self._language), ""]
+            now = time.time()
+            for index, peer in enumerate(peers, start=1):
+                seconds = seconds_since(peer.last_seen)
+                lines.append(
+                    get_message(
+                        "peer_entry",
+                        self._language,
+                        index=index,
+                        name=peer.name,
+                        ip=peer.ip,
+                        seconds=seconds,
+                        version=peer.version,
+                    )
+                )
+        self._set_view("peers", get_message("peer_list_header", self._language), lines, get_message("prompt_choice", self._language))
+
+    async def show_updates(self) -> None:
+        lines = [get_message("updates_info", self._language)]
+        self._set_view("updates", get_message("updates_info", self._language), lines, get_message("prompt_choice", self._language))
+
+    async def show_history(self) -> None:
+        records = load_records(50)
+        if not records:
+            lines = [get_message("history_empty", self._language)]
+        else:
+            lines = [get_message("history_header", self._language), ""]
+            for record in reversed(records):
+                time_text = format_timestamp(record.timestamp)
+                size_text = format_size(record.size)
+                if record.status != "completed":
+                    direction_label = "SEND" if record.direction == "send" else "RECV"
+                    if self._language == "zh":
+                        direction_label = "发送" if record.direction == "send" else "接收"
+                    lines.append(
+                        get_message(
+                            "history_entry_failed",
+                            self._language,
+                            direction=direction_label,
+                            time=time_text,
+                            name=record.remote_name,
+                            ip=record.remote_ip,
+                            filename=record.filename,
+                            status=record.status,
+                        )
+                    )
+                    continue
+                if record.direction == "send":
+                    lines.append(
+                        get_message(
+                            "history_entry_send",
+                            self._language,
+                            time=time_text,
+                            name=record.remote_name,
+                            ip=record.remote_ip,
+                            filename=record.filename,
+                            size=size_text,
+                        )
+                    )
+                else:
+                    lines.append(
+                        get_message(
+                            "history_entry_receive",
+                            self._language,
+                            time=time_text,
+                            name=record.remote_name,
+                            ip=record.remote_ip,
+                            filename=record.filename,
+                            size=size_text,
+                            path=record.target_path or "-",
+                        )
+                    )
+        self._set_view("history", get_message("history_header", self._language), lines, get_message("prompt_choice", self._language))
+
+    async def _prompt(self, prompt_text: str, default: str = "") -> Optional[str]:
+        def do_prompt() -> Optional[str]:
+            try:
+                return self._prompt_session.prompt(prompt_text, default=default)
+            except (KeyboardInterrupt, EOFError):
+                return None
+
+        if self._loop is None:
+            return do_prompt()
+        return await self._application.run_in_terminal(do_prompt)
+
+    async def _prompt_yes_no(self, prompt_text: str) -> bool:
+        response = await self._prompt(f"{prompt_text} (y/n): ")
+        if response is None:
+            return False
+        return response.strip().lower() in {"y", "yes", "是", "shi", "s"}
+
+    async def start_send_flow(self) -> None:
+        peers = self._app.list_peers()
+        if not peers:
+            self._state.status = get_message("no_peers", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            return
+
+        lines = [get_message("peer_list_header", self._language), ""]
+        for index, peer in enumerate(peers, start=1):
+            seconds = seconds_since(peer.last_seen)
+            lines.append(
                 get_message(
-                    "incoming_version_warning",
-                    language,
-                    version=ticket.sender_version,
-                    current=__version__,
+                    "peer_entry",
+                    self._language,
+                    index=index,
+                    name=peer.name,
+                    ip=peer.ip,
+                    seconds=seconds,
+                    version=peer.version,
                 )
             )
-    while True:
-        choice = input(get_message("prompt_pending_choice", language)).strip()
+        self._set_view("send_select_peer", get_message("peer_list_header", self._language), lines, get_message("prompt_peer_index", self._language))
+
+        choice = await self._prompt(get_message("prompt_peer_index", self._language))
         if not choice:
+            self._state.status = get_message("operation_cancelled", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
             return
         if not choice.isdigit():
-            print(get_message("invalid_choice", language))
-            continue
-        idx = int(choice) - 1
-        if 0 <= idx < len(tickets):
-            break
-        print(get_message("invalid_choice", language))
-    ticket = tickets[idx]
-    display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-    while True:
-        action = input(get_message("prompt_accept", language)).strip().lower()
-        if not action:
-            print(get_message("operation_cancelled", language))
+            self._state.status = get_message("invalid_choice", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
             return
-        if action in {"a", "d"}:
-            break
-        print(get_message("invalid_choice", language))
-    if action == "a":
-        default_dir = app.default_download_dir
-        dest = input(
-            get_message(
-                "prompt_save_dir",
-                language,
-                default=str(default_dir),
+        idx = int(choice) - 1
+        if not (0 <= idx < len(peers)):
+            self._state.status = get_message("invalid_choice", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
+            return
+        peer = peers[idx]
+
+        path_input = await self._prompt(get_message("prompt_file_path", self._language))
+        if not path_input:
+            self._state.status = get_message("operation_cancelled", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
+            return
+        file_path = Path(path_input.strip().strip('"').strip("'")).expanduser()
+        if not file_path.exists() or (not file_path.is_file() and not file_path.is_dir()):
+            self._state.status = get_message("file_not_found", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
+            return
+
+        await self._send_file(peer, file_path)
+
+    async def _send_file(self, peer: PeerInfo, file_path: Path) -> None:
+        display_name = file_path.name + ("/" if file_path.is_dir() else "")
+        sending_line = get_message(
+            "sending",
+            self._language,
+            filename=display_name,
+            name=peer.name,
+            ip=peer.ip,
+        )
+        self._state.status = sending_line
+        self._state.add_message(sending_line)
+        self._set_view("send_progress", sending_line, [], get_message("cancel_hint", self._language))
+
+        cancel_event = threading.Event()
+
+        def progress_cb(sent: int, total: int) -> None:
+            if not self._loop:
+                return
+            asyncio.run_coroutine_threadsafe(self._update_progress("send", display_name, sent, total), self._loop)
+
+        loop = asyncio.get_running_loop()
+
+        def run_send() -> tuple[str, str]:
+            return self._app.send_file(peer, file_path, progress_cb=progress_cb, cancel_event=cancel_event)
+
+        try:
+            result, file_hash = await loop.run_in_executor(None, run_send)
+        except TransferCancelled:
+            self._state.progress = None
+            self._state.status = get_message("send_cancelled", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
+            return
+        except Exception as exc:  # noqa: BLE001
+            self._state.progress = None
+            error = get_message("send_failed", self._language, error=exc)
+            self._state.status = error
+            self._state.add_message(error)
+            self._invalidate()
+            await self.show_menu()
+            return
+
+        self._state.progress = None
+        if result == "declined":
+            status = get_message("send_declined", self._language)
+        else:
+            status = get_message("send_success", self._language)
+        self._state.status = status
+        self._state.add_message(status)
+        self._invalidate()
+        await self.show_menu()
+
+    async def _update_progress(self, mode: str, filename: str, sent: int, total: int) -> None:
+        with self._progress_lock:
+            if not self._state.progress or self._state.progress.filename != filename or self._state.progress.mode != mode:
+                self._state.progress = ProgressState(mode=mode, filename=filename, total=total)
+            progress = self._state.progress
+            now = time.time()
+            delta_bytes = sent - progress.transferred
+            delta_time = getattr(progress, "_last_time", None)
+            rate = 0.0
+            if delta_time is not None:
+                elapsed = now - delta_time
+                if elapsed > 0:
+                    rate = delta_bytes / elapsed
+            progress.transferred = sent
+            progress.total = total
+            progress.rate = rate
+            progress._last_time = now  # type: ignore[attr-defined]
+        self._invalidate()
+
+    async def handle_requests(self) -> None:
+        tickets = self._app.pending_requests()
+        if not tickets:
+            self._state.status = get_message("no_pending", self._language)
+            self._state.add_message(self._state.status)
+            self._invalidate()
+            await self.show_menu()
+            return
+        lines = [get_message("pending_header", self._language), ""]
+        for index, ticket in enumerate(tickets, start=1):
+            display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
+            entry = get_message(
+                "pending_entry",
+                self._language,
+                index=index,
+                filename=display_name,
+                size=ticket.filesize,
+                name=ticket.sender_name,
             )
-        ).strip()
-        if dest:
-            destination = Path(dest).expanduser()
+            lines.append(entry)
+            if ticket.sender_version and ticket.sender_version != __version__:
+                lines.append(
+                    get_message(
+                        "incoming_version_warning",
+                        self._language,
+                        version=ticket.sender_version,
+                        current=__version__,
+                    )
+                )
+        self._set_view("requests", get_message("pending_header", self._language), lines, get_message("prompt_pending_choice", self._language))
+
+        choice = await self._prompt(get_message("prompt_pending_choice", self._language))
+        if not choice:
+            self._state.status = get_message("operation_cancelled", self._language)
+            self._invalidate()
+            await self.show_menu()
+            return
+        if not choice.isdigit():
+            self._state.status = get_message("invalid_choice", self._language)
+            self._invalidate()
+            await self.show_menu()
+            return
+        idx = int(choice) - 1
+        if not (0 <= idx < len(tickets)):
+            self._state.status = get_message("invalid_choice", self._language)
+            self._invalidate()
+            await self.show_menu()
+            return
+        ticket = tickets[idx]
+
+        action = await self._prompt(get_message("prompt_accept", self._language))
+        if not action:
+            self._state.status = get_message("operation_cancelled", self._language)
+            self._invalidate()
+            return
+        action = action.strip().lower()
+        if action not in {"a", "d"}:
+            self._state.status = get_message("invalid_choice", self._language)
+            self._invalidate()
+            await self.show_menu()
+            return
+
+        if action == "d":
+            if self._app.decline_request(ticket.request_id):
+                status = get_message("receive_declined", self._language)
+            else:
+                status = get_message("invalid_choice", self._language)
+            self._state.status = status
+            self._state.add_message(status)
+            self._invalidate()
+            await self.show_menu()
+            return
+
+        default_dir = self._app.default_download_dir
+        destination_input = await self._prompt(
+            get_message("prompt_save_dir", self._language, default=str(default_dir)),
+            default=str(default_dir),
+        )
+        if destination_input:
+            destination = Path(destination_input).expanduser()
         else:
             destination = default_dir
-        accepted_ticket = app.accept_request(ticket.request_id, destination)
+        accepted_ticket = self._app.accept_request(ticket.request_id, destination)
         if not accepted_ticket:
-            print(get_message("invalid_choice", language))
+            self._state.status = get_message("invalid_choice", self._language)
+            self._invalidate()
             return
-        print(get_message("receive_started", language, filename=display_name))
-        wait_for_completion(accepted_ticket, language)
-        if accepted_ticket.status == "completed" and accepted_ticket.saved_path:
-            print(
-                get_message(
-                    "receive_done",
-                    language,
-                    path=str(accepted_ticket.saved_path),
-                )
-            )
-            app.log_history(
-                direction="receive",
-                status="completed",
-                filename=display_name,
-                size=ticket.filesize,
-                sha256=ticket.expected_hash,
-                remote_name=ticket.sender_name,
-                remote_ip=ticket.sender_ip,
-                source_path=None,
-                target_path=accepted_ticket.saved_path,
-                remote_version=ticket.sender_version,
-            )
-        elif accepted_ticket.status == "failed":
-            print(get_message("receive_failed", language, error=accepted_ticket.error))
-            app.log_history(
-                direction="receive",
-                status=accepted_ticket.error or "failed",
-                filename=display_name,
-                size=ticket.filesize,
-                sha256=ticket.expected_hash,
-                remote_name=ticket.sender_name,
-                remote_ip=ticket.sender_ip,
-                source_path=None,
-                target_path=accepted_ticket.saved_path,
-                remote_version=ticket.sender_version,
-            )
-        else:
-            print(get_message("receive_failed", language, error="unknown state"))
-            app.log_history(
-                direction="receive",
-                status=accepted_ticket.status,
-                filename=display_name,
-                size=ticket.filesize,
-                sha256=ticket.expected_hash,
-                remote_name=ticket.sender_name,
-                remote_ip=ticket.sender_ip,
-                source_path=None,
-                target_path=accepted_ticket.saved_path,
-                remote_version=ticket.sender_version,
-            )
-    elif action == "d":
-        if app.decline_request(ticket.request_id):
-            print(get_message("receive_declined", language))
-            app.log_history(
-                direction="receive",
-                status="declined",
-                filename=display_name,
-                size=ticket.filesize,
-                sha256=ticket.expected_hash,
-                remote_name=ticket.sender_name,
-                remote_ip=ticket.sender_ip,
-                source_path=None,
-                target_path=None,
-                remote_version=ticket.sender_version,
-            )
-        else:
-            print(get_message("invalid_choice", language))
+        await self._monitor_ticket(accepted_ticket)
 
+    async def _monitor_ticket(self, ticket: TransferTicket) -> None:
+        filename = ticket.filename + ("/" if ticket.content_type == "directory" else "")
+        self._state.status = get_message("receive_started", self._language, filename=filename)
+        self._state.add_message(self._state.status)
+        self._invalidate()
 
-def show_updates(language: str) -> None:
-    print(get_message("updates_info", language))
-
-
-def show_history(language: str, limit: int = 20) -> None:
-    records = load_records(limit)
-    if not records:
-        print(get_message("history_empty", language))
-        return
-    print(get_message("history_header", language))
-    for record in reversed(records):
-        time_text = format_timestamp(record.timestamp)
-        size_text = format_size(record.size)
-        if record.status != "completed":
-            direction_label = "SEND" if record.direction == "send" else "RECV"
-            if language == "zh":
-                direction_label = "发送" if record.direction == "send" else "接收"
-            print(
-                get_message(
-                    "history_entry_failed",
-                    language,
-                    direction=direction_label,
-                    time=time_text,
-                    name=record.remote_name,
-                    ip=record.remote_ip,
-                    filename=record.filename,
-                    status=record.status,
-                )
-            )
-            continue
-        if record.direction == "send":
-            print(
-                get_message(
-                    "history_entry_send",
-                    language,
-                    time=time_text,
-                    name=record.remote_name,
-                    ip=record.remote_ip,
-                    filename=record.filename,
-                    size=size_text,
-                )
-            )
-        else:
-            print(
-                get_message(
-                    "history_entry_receive",
-                    language,
-                    time=time_text,
-                    name=record.remote_name,
-                    ip=record.remote_ip,
-                    filename=record.filename,
-                    size=size_text,
-                    path=record.target_path or "-",
-                )
-            )
-
-
-def settings_menu(app: GlitterApp, config: AppConfig, language: str) -> str:
-    while True:
-        print()
-        lang_code = config.language or language or "en"
-        lang_name = LANGUAGES.get(lang_code, lang_code)
-        device_display = config.device_name or app.device_name
-        encryption_label = get_message(
-            "settings_encryption_on" if app.encryption_enabled else "settings_encryption_off",
-            language,
-        )
-        print(
-            get_message(
-                "settings_header",
-                language,
-                language_name=lang_name,
-                language_code=lang_code,
-                device=device_display,
-                port=app.transfer_port,
-                encryption=encryption_label,
-            )
-        )
-        print(get_message("settings_options", language))
-        try:
-            choice = input(get_message("settings_prompt", language)).strip()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return language
-        if choice == "1":
-            default_lang = config.language or language or "en"
-            new_lang = prompt_language_choice(default_lang, allow_cancel=True)
-            if not new_lang:
-                print(get_message("operation_cancelled", language))
-                continue
-            if new_lang == config.language:
-                print(get_message("operation_cancelled", language))
-                continue
-            config.language = new_lang
-            save_config(config)
-            app.update_identity(config.device_name or app.device_name, new_lang)
-            language = new_lang
-            lang_name = LANGUAGES.get(new_lang, new_lang)
-            print(get_message("settings_language_updated", language, language_name=lang_name))
-        elif choice == "2":
-            default_name = config.device_name or app.device_name
-            new_name = prompt_device_name(language, allow_cancel=True, default_name=default_name)
-            if new_name is None:
-                print(get_message("operation_cancelled", language))
-                continue
-            if new_name == config.device_name:
-                print(get_message("operation_cancelled", language))
-                continue
-            config.device_name = new_name
-            save_config(config)
-            app.update_identity(new_name, language)
-            print(get_message("settings_device_updated", language, name=new_name))
-        elif choice == "3":
-            current_port = app.transfer_port
-            try:
-                port_input = input(
-                    get_message(
-                        "prompt_transfer_port",
-                        language,
-                        current=current_port,
-                    )
-                ).strip()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                print(get_message("operation_cancelled", language))
-                continue
-            if not port_input:
-                print(get_message("operation_cancelled", language))
-                continue
-            if not port_input.isdigit():
-                print(get_message("settings_port_invalid", language))
-                continue
-            new_port = int(port_input)
-            if not (1 <= new_port <= 65535):
-                print(get_message("settings_port_invalid", language))
-                continue
-            if new_port == current_port and not app.allows_ephemeral_fallback:
-                print(get_message("settings_port_same", language))
-                continue
-            try:
-                actual_port = app.change_transfer_port(new_port)
-            except ValueError:
-                print(get_message("settings_port_invalid", language))
-                continue
-            except OSError as exc:
-                print(
-                    get_message(
-                        "settings_port_failed",
-                        language,
-                        port=new_port,
-                        error=exc,
-                    )
-                )
-                continue
-            config.transfer_port = actual_port
-            save_config(config)
-            print(get_message("settings_port_updated", language, port=actual_port))
-        elif choice == "4":
-            try:
-                confirm = input(get_message("settings_clear_confirm", language)).strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                print(get_message("operation_cancelled", language))
-                continue
-            if confirm in {"y", "yes", "是", "shi", "s"}:
-                clear_history()
-                print(get_message("settings_history_cleared", language))
-            else:
-                print(get_message("operation_cancelled", language))
-        elif choice == "5":
-            current_label = get_message(
-                "settings_encryption_on" if app.encryption_enabled else "settings_encryption_off",
-                language,
-            )
-            try:
-                answer = input(
-                    get_message(
-                        "settings_encryption_prompt",
-                        language,
-                        state=current_label,
-                    )
-                ).strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                print(get_message("operation_cancelled", language))
-                continue
-            if not answer:
-                print(get_message("operation_cancelled", language))
-                continue
-            if answer in {"y", "yes", "true", "on", "1", "是", "shi"}:
-                desired = True
-            elif answer in {"n", "no", "false", "off", "0", "否", "fou"}:
-                desired = False
-            else:
-                print(get_message("invalid_choice", language))
-                continue
-            if desired == app.encryption_enabled:
-                print(get_message("operation_cancelled", language))
-                continue
-            app.set_encryption_enabled(desired)
-            config.encryption_enabled = desired
-            save_config(config)
-            updated_label = get_message(
-                "settings_encryption_on" if desired else "settings_encryption_off",
-                language,
-            )
-            print(
-                get_message(
-                    "settings_encryption_updated",
-                    language,
-                    state=updated_label,
-                )
-            )
-        elif choice == "6":
-            return language
-        else:
-            print(get_message("invalid_choice", language))
-
-
-def wait_for_completion(ticket: TransferTicket, language: str, timeout: float = 600.0) -> None:
-    start = time.time()
-    last_sent = -1
-    last_time = None
-    progress_shown = False
-    while ticket.status in {"pending", "receiving"}:
-        if ticket.status == "receiving":
+        while ticket.status in {"pending", "receiving"}:
             sent = ticket.bytes_transferred
             total = ticket.filesize
-            now = time.time()
-            time_since = (now - last_time) if last_time is not None else None
-            if sent != last_sent or (time_since is not None and time_since >= 0.1) or sent == total:
-                delta_bytes = sent - last_sent if last_sent >= 0 else 0
-                delta_time = time_since if time_since and time_since > 0 else 0.0
-                rate = delta_bytes / delta_time if delta_time > 0 else 0.0
-                message = get_message(
-                    "progress_line",
-                    language,
-                    transferred=format_size(sent),
-                    total=format_size(total),
-                    rate=format_rate(rate),
+            await self._update_progress("receive", filename, sent, total)
+            await asyncio.sleep(0.3)
+
+        self._state.progress = None
+        if ticket.status == "completed" and ticket.saved_path:
+            message = get_message("receive_done", self._language, path=str(ticket.saved_path))
+            self._state.status = message
+            self._state.add_message(message)
+            self._app.log_history(
+                direction="receive",
+                status="completed",
+                filename=filename,
+                size=ticket.filesize,
+                sha256=ticket.expected_hash,
+                remote_name=ticket.sender_name,
+                remote_ip=ticket.sender_ip,
+                source_path=None,
+                target_path=ticket.saved_path,
+                remote_version=ticket.sender_version,
+            )
+        elif ticket.status == "failed":
+            message = get_message("receive_failed", self._language, error=ticket.error)
+            self._state.status = message
+            self._state.add_message(message)
+            self._app.log_history(
+                direction="receive",
+                status=ticket.error or "failed",
+                filename=filename,
+                size=ticket.filesize,
+                sha256=ticket.expected_hash,
+                remote_name=ticket.sender_name,
+                remote_ip=ticket.sender_ip,
+                source_path=None,
+                target_path=ticket.saved_path,
+                remote_version=ticket.sender_version,
+            )
+        else:
+            message = get_message("receive_failed", self._language, error="unknown state")
+            self._state.status = message
+            self._state.add_message(message)
+        self._invalidate()
+        await self.show_menu()
+
+    async def open_settings(self) -> None:
+        status_line = ""
+        try:
+            while True:
+                encryption_label = self._encryption_label()
+                header_text = get_message(
+                    "settings_header",
+                    self._language,
+                    language_name=LANGUAGES.get(self._language, self._language),
+                    language_code=self._language,
+                    device=self._app.device_name,
+                    port=self._app.transfer_port,
+                    encryption=encryption_label,
                 )
-                print("\r" + message, end="", flush=True)
-                last_sent = sent
-                last_time = now
-                progress_shown = True
-        time.sleep(0.2)
-        if timeout and (time.time() - start) > timeout:
-            ticket.status = "failed"
-            ticket.error = "timeout"
-            break
-    if progress_shown:
-        print()
+                lines = [header_text, "", get_message("settings_options", self._language)]
+                if status_line:
+                    lines.extend(["", status_line])
+                self._set_view(
+                    "settings",
+                    header_text,
+                    lines,
+                    get_message("settings_prompt", self._language),
+                )
+
+                choice = await self._prompt(get_message("settings_prompt", self._language))
+                if choice is None:
+                    break
+                choice = choice.strip()
+
+                if choice == "1":
+                    new_lang = await self._prompt(
+                        get_message("prompt_language_choice", self._language, default=self._language),
+                        default=self._language,
+                    )
+                    if not new_lang:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    new_lang = new_lang.strip().lower()
+                    if new_lang not in LANGUAGES:
+                        status_line = get_message("invalid_choice", self._language)
+                        continue
+                    if new_lang == self._language:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    self._language = new_lang
+                    self._app.update_identity(self._app.device_name, new_lang)
+                    self._config.language = new_lang
+                    save_config(self._config)
+                    status_line = get_message(
+                        "settings_language_updated",
+                        self._language,
+                        language_name=LANGUAGES.get(new_lang, new_lang),
+                    )
+                elif choice == "2":
+                    default_name = self._config.device_name or self._app.device_name
+                    new_name = await self._prompt(
+                        get_message("prompt_device_name", self._language, default=default_name),
+                        default=default_name,
+                    )
+                    if new_name is None:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    new_name = new_name.strip()
+                    if not new_name:
+                        new_name = default_device_name()
+                    if new_name == self._config.device_name:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    self._config.device_name = new_name
+                    save_config(self._config)
+                    self._app.update_identity(new_name, self._language)
+                    status_line = get_message("settings_device_updated", self._language, name=new_name)
+                elif choice == "3":
+                    current_port = self._app.transfer_port
+                    port_input = await self._prompt(
+                        get_message("prompt_transfer_port", self._language, current=current_port)
+                    )
+                    if not port_input:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    if not port_input.isdigit():
+                        status_line = get_message("settings_port_invalid", self._language)
+                        continue
+                    port_value = int(port_input)
+                    try:
+                        actual_port = self._app.change_transfer_port(port_value)
+                    except ValueError:
+                        status_line = get_message("settings_port_invalid", self._language)
+                        continue
+                    except OSError as exc:  # noqa: BLE001
+                        status_line = get_message(
+                            "settings_port_failed",
+                            self._language,
+                            port=port_value,
+                            error=exc,
+                        )
+                        continue
+                    self._config.transfer_port = actual_port
+                    save_config(self._config)
+                    status_line = get_message("settings_port_updated", self._language, port=actual_port)
+                elif choice == "4":
+                    if await self._prompt_yes_no(get_message("settings_clear_confirm", self._language)):
+                        clear_history()
+                        status_line = get_message("settings_history_cleared", self._language)
+                    else:
+                        status_line = get_message("operation_cancelled", self._language)
+                elif choice == "5":
+                    answer = await self._prompt(
+                        get_message(
+                            "settings_encryption_prompt",
+                            self._language,
+                            state=self._encryption_label(),
+                        )
+                    )
+                    if not answer:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    answer = answer.strip().lower()
+                    if answer in {"y", "yes", "true", "on", "1", "是", "shi"}:
+                        desired = True
+                    elif answer in {"n", "no", "false", "off", "0", "否", "fou"}:
+                        desired = False
+                    else:
+                        status_line = get_message("invalid_choice", self._language)
+                        continue
+                    if desired == self._app.encryption_enabled:
+                        status_line = get_message("operation_cancelled", self._language)
+                        continue
+                    self._app.set_encryption_enabled(desired)
+                    self._config.encryption_enabled = desired
+                    save_config(self._config)
+                    status_line = get_message(
+                        "settings_encryption_updated",
+                        self._language,
+                        state=self._encryption_label(),
+                    )
+                elif choice == "6":
+                    break
+                else:
+                    status_line = get_message("invalid_choice", self._language)
+        finally:
+            await self.show_menu()
 
 
-def run_cli() -> int:
+async def prompt_for_language(default: str) -> str:
+    session = PromptSession()
+    while True:
+        options = ", ".join(f"{code}:{name}" for code, name in LANGUAGES.items())
+        try:
+            value = session.prompt(f"Language [{default}] ({options}): ")
+        except (KeyboardInterrupt, EOFError):
+            return default
+        value = value.strip().lower() or default
+        if value in LANGUAGES:
+            return value
+
+
+async def prompt_for_device(language: str, default_name: str) -> str:
+    session = PromptSession()
+    prompt_text = get_message("prompt_device_name", language, default=default_name)
+    try:
+        name = session.prompt(prompt_text, default=default_name).strip()
+    except (KeyboardInterrupt, EOFError):
+        return default_name
+    return name or default_name
+
+
+async def run_cli_async() -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     config = load_config()
 
-    if config.language:
-        language = config.language
-    else:
-        language = choose_language()
-        config.language = language
-        save_config(config)
+    language = config.language or await prompt_for_language("en")
+    config.language = language
+    save_config(config)
 
-    if config.device_name:
-        device_name = config.device_name
-    else:
-        device_name = prompt_device_name(language) or default_device_name()
-        config.device_name = device_name
-        save_config(config)
+    device_name = config.device_name or await prompt_for_device(language, default_device_name())
+    config.device_name = device_name
+    save_config(config)
 
     app = GlitterApp(
         device_name=device_name,
@@ -1001,8 +1067,10 @@ def run_cli() -> int:
         debug=debug,
         encryption_enabled=config.encryption_enabled,
     )
-    print(get_message("welcome", language))
-    print(get_message("current_version", language, version=__version__))
+
+    ui = PromptToolkitUI(app, config, language)
+    app.attach_ui(ui)
+
     try:
         app.start()
     except OSError as exc:
@@ -1010,43 +1078,16 @@ def run_cli() -> int:
         print(get_message("settings_port_failed", language, port=failure_port, error=exc))
         app.stop()
         return 1
+
     try:
-        while True:
-            has_pending = len(app.pending_requests())
-            try:
-                display_menu(language, has_pending)
-                choice = input(get_message("prompt_choice", language)).strip()
-            except (KeyboardInterrupt, EOFError):
-                app.cancel_pending_requests()
-                print("\n" + get_message("goodbye", language))
-                break
-            if choice == "1":
-                list_peers_cli(app, language)
-            elif choice == "2":
-                send_file_cli(app, language)
-            elif choice == "3":
-                handle_requests_cli(app, language)
-            elif choice == "4":
-                show_updates(language)
-            elif choice == "5":
-                show_history(language)
-            elif choice == "6":
-                language = settings_menu(app, config, language)
-            elif choice == "7":
-                app.cancel_pending_requests()
-                print(get_message("goodbye", language))
-                break
-            else:
-                print(get_message("invalid_choice", language))
-    except KeyboardInterrupt:
-        app.cancel_pending_requests()
-        print("\n" + get_message("goodbye", language))
+        await ui.run()
     finally:
-        try:
-            app.stop()
-        except KeyboardInterrupt:
-            pass
+        app.stop()
     return 0
+
+
+def run_cli() -> int:
+    return asyncio.run(run_cli_async())
 
 
 def main() -> int:
@@ -1054,4 +1095,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
