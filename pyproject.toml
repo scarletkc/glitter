@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "glitter-cli"
+description = "A Simple LAN File Transfer CLI."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "scarletkc" },
+]
+keywords = ["file-transfer", "lan", "cli", "glitter"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: File Sharing",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "cryptography>=46.0.3",
+    "rich>=14.2.0",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/scarletkc/glitter"
+Repository = "https://github.com/scarletkc/glitter"
+Issues = "https://github.com/scarletkc/glitter/issues"
+Changelog = "https://github.com/scarletkc/glitter/commits/main"
+
+[project.scripts]
+glitter = "glitter.cli:main"
+
+[tool.hatch.version]
+path = "glitter/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "glitter",
+    "README.md",
+    "LICENSE",
+    "requirements.txt",
+    "docs",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["glitter"]
