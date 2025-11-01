@@ -3,7 +3,7 @@
 Glitter is a cross‑platform, terminal‑based tool for sending files over a local network. It discovers peers automatically (like LocalSend), confirms transfers on the receiver, and supports English/Chinese UIs.
 
 - OS support: Linux, macOS, Windows
-- Bilingual UI: English, 中文（可在设置中切换）
+- Bilingual UI: English, 中文 (switchable in settings)
 - Peer discovery via UDP broadcast + smart replies
 - Encrypted transfer (DH key exchange + stream cipher)
 - Integrity check (SHA‑256) after receive
