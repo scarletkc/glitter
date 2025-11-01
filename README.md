@@ -25,6 +25,7 @@ Glitter provides a **simple, terminal-based** alternative to GUI tools and compl
 | **SFTP/SCP** | Universal, encrypted | Needs SSH server setup, manual IP entry | **Zero-config**: auto-discovers peers, no server setup |
 | **rsync** | Powerful sync engine | Complex syntax, requires remote shell access | **Interactive**: menu-driven, progress bars, history tracking |
 | **HTTP file server** | Simple `python -m http.server` | No encryption, manual URL sharing | **Secure**: DH key exchange + encryption, peer selection UI |
+| **croc** | End-to-end encryption, relay servers, cross-platform | Requires typing codes, internet relay by default | **LAN-native**: auto-discovery on local network, no codes needed, works offline |
 
 **Use Glitter when you want:**
 - Quick file sharing on LAN without leaving the terminal
