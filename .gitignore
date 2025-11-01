@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.venv-linux/
 
 # Distribution / packaging
 build/

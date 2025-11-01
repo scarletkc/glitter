@@ -11,6 +11,8 @@ import secrets
 from pathlib import Path
 from typing import Tuple
 
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+
 # 2048-bit MODP Group (RFC 3526)
 DH_PRIME = int(
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E08"
@@ -75,37 +77,31 @@ def compute_file_sha256(path: Path) -> str:
 
 class StreamCipher:
     """
-    Simple SHA-256 counter-based stream cipher for encrypting/decrypting bytes.
+    ChaCha20-based stream cipher backed by cryptography's C extensions.
+
+    The previous pure Python implementation saturated CPU when large files were
+    transferred. Using ChaCha20 moves the heavy lifting into optimized native
+    code while preserving the original interface for the rest of the transfer
+    stack.
     """
 
+    _KEY_SIZE = 32
+    _NONCE_SIZE = 16
+
     def __init__(self, key: bytes, nonce: bytes) -> None:
-        self._key = key
-        self._nonce = nonce
-        self._counter = 0
-        self._buffer = b""
+        if len(key) < self._KEY_SIZE:
+            raise ValueError("session key must be at least 32 bytes for ChaCha20")
+        if len(nonce) != self._NONCE_SIZE:
+            raise ValueError("nonce must be exactly 16 bytes for ChaCha20")
+        # ChaCha20 consumes exactly 32 bytes; keep compatibility with the
+        # derived session key by truncating if necessary.
+        algorithm = algorithms.ChaCha20(key[: self._KEY_SIZE], nonce)
+        self._context = Cipher(algorithm, mode=None).encryptor()
 
     def process(self, data: bytes) -> bytes:
         if not data:
             return b""
-        needed = len(data)
-        if len(self._buffer) < needed:
-            self._buffer += self._generate_keystream(needed - len(self._buffer))
-        output = bytearray(needed)
-        for i in range(needed):
-            output[i] = data[i] ^ self._buffer[i]
-        self._buffer = self._buffer[needed:]
-        return bytes(output)
-    
-    def _generate_keystream(self, size: int) -> bytes:
-        """Generate a block of keystream bytes."""
-        stream = bytearray()
-        while len(stream) < size:
-            block = hashlib.sha256(
-                self._key + self._nonce + self._counter.to_bytes(8, "big")
-            ).digest()
-            self._counter += 1
-            stream.extend(block)
-        return bytes(stream)
+        return self._context.update(data)
 
 
 def random_nonce(size: int = 16) -> bytes:
@@ -115,4 +111,3 @@ def random_nonce(size: int = 16) -> bytes:
 def _int_to_bytes(value: int) -> bytes:
     length = (value.bit_length() + 7) // 8 or 1
     return value.to_bytes(length, "big")
-

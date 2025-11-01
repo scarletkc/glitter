@@ -15,11 +15,12 @@ Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动
 
 ## 快速开始
 
-要求：[Python 3.9+](https://www.python.org/downloads/)
+要求：[Python 3.9+](https://www.python.org/downloads/)、[requirements.txt](../requirements.txt)
 
 - Linux/macOS/WSL/Windows (PowerShell/CMD) 运行：
   - `git clone https://github.com/scarletkc/glitter.git`
-  - `python3 -m glitter`
+  - `pip install -r requirements.txt`
+  - `python -m glitter.glitter`
 
 首次启动会提示选择语言与设备名称，并保存。之后启动将直接进入主菜单。
 

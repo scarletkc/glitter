@@ -15,11 +15,12 @@ Chinese docs: see [README.zh-CN.md](./docs/README.zh-CN.md).
 
 ## Quick Start
 
-Requirements: [Python 3.9+](https://www.python.org/downloads/)
+Requirements: [Python 3.9+](https://www.python.org/downloads/), [requirements.txt](./requirements.txt)
 
 - Linux/macOS/WSL/Windows (PowerShell/CMD) Run: 
   - `git clone https://github.com/scarletkc/glitter.git`
-  - `python3 -m glitter`
+  - `pip install -r requirements.txt`
+  - `python -m glitter.glitter`
 
 On first run, Glitter asks for language and device name and saves them. Next runs go straight to the main menu.
 

@@ -437,7 +437,7 @@ def send_file_cli(app: GlitterApp, language: str) -> None:
     def report_progress(sent: int, total: int) -> None:
         now = time.time()
         last_time = last_progress["time"]
-        if last_time is not None:
+        if sent != total and last_time is not None:
             if (now - last_time) < throttle["min_interval"]:
                 prev = last_progress["sent"]
                 if prev >= 0 and (sent - prev) < throttle["min_bytes"]:

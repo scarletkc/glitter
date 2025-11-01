@@ -27,7 +27,7 @@ from .security import (
     random_nonce,
 )
 
-BUFFER_SIZE = 256 * 1024
+BUFFER_SIZE = 1024 * 1024
 PROTOCOL_VERSION = 1
 DEFAULT_TRANSFER_PORT = 45846
 
@@ -218,7 +218,7 @@ class TransferService:
         with socket.create_connection((target_ip, target_port), timeout=10) as sock:
             # Allow ample time for the receiver to review and accept the transfer
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, BUFFER_SIZE)
             sock.settimeout(HANDSHAKE_TIMEOUT)
             sock.sendall(message.encode("utf-8"))
             sock.settimeout(0.5)
@@ -271,7 +271,7 @@ class TransferService:
                     if not chunk:
                         break
                     encrypted = cipher.process(chunk)
-                    sock.sendall(encrypted)
+                    sock.sendall(memoryview(encrypted))
                     bytes_sent += len(chunk)
                     if progress_cb:
                         progress_cb(bytes_sent, file_size)
@@ -320,7 +320,7 @@ class TransferService:
         with conn:
             try:
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256 * 1024)
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, BUFFER_SIZE)
             except OSError:
                 pass  
             reader = conn.makefile("rb")
