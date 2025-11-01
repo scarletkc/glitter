@@ -30,14 +30,14 @@ On first run, Glitter asks for language and device name and saves them. Next run
 - [3] Incoming requests: Review transfer requests; Accept/Decline and choose a save directory
 - [4] Check updates: Open‑source repo link
 - [5] History: Show the latest transfer records
-- [6] Settings: Change language/device name, clear history
+- [6] Settings: Change language/device name/port, clear history
 - [7] Quit: Exit the program
 
 - Firewall: Allow UDP 45845 and TCP 45846 (transfer port) for the app if discovery/transfer is blocked.
 
 ## Files & Persistence
 
-- Config: `~/.glitter/config.json` (language, device name)
+- Config: `~/.glitter/config.json` (language, device name, transfer port)
 - History: `~/.glitter/history.jsonl` (one JSON per line)
 - Default download folder: `~/Downloads/GlitterDownloads` on Windows, `~/GlitterDownloads` elsewhere
 

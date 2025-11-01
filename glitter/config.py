@@ -18,6 +18,7 @@ CONFIG_FILE = HISTORY_DIR / "config.json"
 class AppConfig:
     language: Optional[str] = None
     device_name: Optional[str] = None
+    transfer_port: Optional[int] = None
 
 
 def load_config() -> AppConfig:
@@ -29,9 +30,12 @@ def load_config() -> AppConfig:
             data = json.load(handle)
     except (ValueError, OSError):
         return AppConfig()
+    port_value = data.get("transfer_port")
+    transfer_port = port_value if isinstance(port_value, int) and 1 <= port_value <= 65535 else None
     return AppConfig(
         language=data.get("language"),
         device_name=data.get("device_name"),
+        transfer_port=transfer_port,
     )
 
 
@@ -40,4 +44,3 @@ def save_config(config: AppConfig) -> None:
     payload = asdict(config)
     with CONFIG_FILE.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
-

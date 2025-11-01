@@ -24,7 +24,7 @@ from .history import (
     now_iso,
 )
 from .language import LANGUAGES, get_message
-from .transfer import TransferCancelled, TransferService, TransferTicket
+from .transfer import DEFAULT_TRANSFER_PORT, TransferCancelled, TransferService, TransferTicket
 from .utils import (
     default_device_name,
     ensure_download_dir,
@@ -38,24 +38,95 @@ from .utils import (
 class GlitterApp:
     """Orchestrates discovery, transfers, and CLI prompts."""
 
-    def __init__(self, device_name: str, language: str, debug: bool = False) -> None:
+    def __init__(
+        self,
+        device_name: str,
+        language: str,
+        transfer_port: Optional[int] = None,
+        debug: bool = False,
+    ) -> None:
         self.device_id = str(uuid.uuid4())
         self.device_name = device_name
         self.language = language
         self.default_download_dir = ensure_download_dir()
         self.debug = debug
 
-        self._transfer_service = TransferService(
+        if isinstance(transfer_port, int) and 1 <= transfer_port <= 65535:
+            preferred_port = transfer_port
+            allow_fallback = False
+        else:
+            preferred_port = DEFAULT_TRANSFER_PORT
+            allow_fallback = True
+
+        self._preferred_port = preferred_port
+        self._allow_ephemeral_fallback = allow_fallback
+        self._transfer_service = self._create_transfer_service(preferred_port, allow_fallback)
+        self._discovery: Optional[DiscoveryService] = None
+        self._incoming_lock = threading.Lock()
+        self._incoming_counter = 0
+        self._history_lock = threading.Lock()
+
+    def _create_transfer_service(self, bind_port: int, allow_fallback: bool) -> TransferService:
+        return TransferService(
             device_id=self.device_id,
             device_name=self.device_name,
             language=self.language,
             on_new_request=self._handle_incoming_request,
             on_cancelled_request=self._handle_request_cancelled,
+            bind_port=bind_port,
+            allow_ephemeral_fallback=allow_fallback,
         )
-        self._discovery: Optional[DiscoveryService] = None
-        self._incoming_lock = threading.Lock()
-        self._incoming_counter = 0
-        self._history_lock = threading.Lock()
+
+    @property
+    def transfer_port(self) -> int:
+        return self._transfer_service.port
+
+    @property
+    def allows_ephemeral_fallback(self) -> bool:
+        return self._allow_ephemeral_fallback
+
+    def change_transfer_port(self, new_port: int) -> int:
+        if not (1 <= new_port <= 65535):
+            raise ValueError("invalid port")
+        if new_port == self._transfer_service.port and not self._allow_ephemeral_fallback:
+            return self._transfer_service.port
+
+        self.cancel_pending_requests()
+        old_service = self._transfer_service
+        old_allow_fallback = self._allow_ephemeral_fallback
+        old_preferred = self._preferred_port
+
+        old_service.stop()
+        try:
+            new_service = self._create_transfer_service(new_port, allow_fallback=False)
+            new_service.start()
+        except OSError as exc:
+            try:
+                old_service.start()
+                old_service.update_identity(self.device_name, self.language)
+                if self._discovery:
+                    self._discovery.update_identity(
+                        self.device_name,
+                        self.language,
+                        old_service.port,
+                    )
+            finally:
+                self._transfer_service = old_service
+                self._allow_ephemeral_fallback = old_allow_fallback
+                self._preferred_port = old_preferred
+            raise exc
+
+        new_service.update_identity(self.device_name, self.language)
+        self._transfer_service = new_service
+        self._preferred_port = new_port
+        self._allow_ephemeral_fallback = False
+        if self._discovery:
+            self._discovery.update_identity(
+                self.device_name,
+                self.language,
+                self._transfer_service.port,
+            )
+        return self._transfer_service.port
 
     def start(self) -> None:
         self._transfer_service.start()
@@ -703,6 +774,7 @@ def settings_menu(app: GlitterApp, config: AppConfig, language: str) -> str:
                 language_name=lang_name,
                 language_code=lang_code,
                 device=device_display,
+                port=app.transfer_port,
             )
         )
         print(get_message("settings_options", language))
@@ -740,6 +812,51 @@ def settings_menu(app: GlitterApp, config: AppConfig, language: str) -> str:
             app.update_identity(new_name, language)
             print(get_message("settings_device_updated", language, name=new_name))
         elif choice == "3":
+            current_port = app.transfer_port
+            try:
+                port_input = input(
+                    get_message(
+                        "prompt_transfer_port",
+                        language,
+                        current=current_port,
+                    )
+                ).strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                print(get_message("operation_cancelled", language))
+                continue
+            if not port_input:
+                print(get_message("operation_cancelled", language))
+                continue
+            if not port_input.isdigit():
+                print(get_message("settings_port_invalid", language))
+                continue
+            new_port = int(port_input)
+            if not (1 <= new_port <= 65535):
+                print(get_message("settings_port_invalid", language))
+                continue
+            if new_port == current_port and not app.allows_ephemeral_fallback:
+                print(get_message("settings_port_same", language))
+                continue
+            try:
+                actual_port = app.change_transfer_port(new_port)
+            except ValueError:
+                print(get_message("settings_port_invalid", language))
+                continue
+            except OSError as exc:
+                print(
+                    get_message(
+                        "settings_port_failed",
+                        language,
+                        port=new_port,
+                        error=exc,
+                    )
+                )
+                continue
+            config.transfer_port = actual_port
+            save_config(config)
+            print(get_message("settings_port_updated", language, port=actual_port))
+        elif choice == "4":
             try:
                 confirm = input(get_message("settings_clear_confirm", language)).strip().lower()
             except (KeyboardInterrupt, EOFError):
@@ -751,7 +868,7 @@ def settings_menu(app: GlitterApp, config: AppConfig, language: str) -> str:
                 print(get_message("settings_history_cleared", language))
             else:
                 print(get_message("operation_cancelled", language))
-        elif choice == "4":
+        elif choice == "5":
             return language
         else:
             print(get_message("invalid_choice", language))
@@ -810,10 +927,21 @@ def run_cli() -> int:
         config.device_name = device_name
         save_config(config)
 
-    app = GlitterApp(device_name=device_name, language=language, debug=debug)
+    app = GlitterApp(
+        device_name=device_name,
+        language=language,
+        transfer_port=config.transfer_port,
+        debug=debug,
+    )
     print(get_message("welcome", language))
     print(get_message("current_version", language, version=__version__))
-    app.start()
+    try:
+        app.start()
+    except OSError as exc:
+        failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
+        print(get_message("settings_port_failed", language, port=failure_port, error=exc))
+        app.stop()
+        return 1
     try:
         while True:
             has_pending = len(app.pending_requests())

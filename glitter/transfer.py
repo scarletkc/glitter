@@ -106,6 +106,7 @@ class TransferService:
         on_new_request: Callable[[TransferTicket], None],
         on_cancelled_request: Optional[Callable[[TransferTicket], None]] = None,
         bind_port: int = DEFAULT_TRANSFER_PORT,
+        allow_ephemeral_fallback: bool = True,
     ) -> None:
         self.device_id = device_id
         self.device_name = device_name
@@ -113,6 +114,7 @@ class TransferService:
         self.on_new_request = on_new_request
         self.on_cancelled_request = on_cancelled_request
         self.bind_port = bind_port
+        self._allow_ephemeral_fallback = allow_ephemeral_fallback
 
         self._pending: Dict[str, TransferTicket] = {}
         self._pending_lock = threading.Lock()
@@ -134,9 +136,9 @@ class TransferService:
         sock: Optional[socket.socket] = None
         last_error: Optional[OSError] = None
         candidates = []
-        if self.bind_port:
-            candidates.append(self.bind_port)
-        candidates.append(0)
+        candidates.append(self.bind_port)
+        if self.bind_port != 0 and self._allow_ephemeral_fallback:
+            candidates.append(0)
 
         for candidate in candidates:
             trial = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
