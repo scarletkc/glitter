@@ -13,7 +13,10 @@ from PyInstaller.utils.win32.versioninfo import (
     VSVersionInfo,
 )
 
-ROOT_DIR = Path(__file__).resolve().parent
+try:
+    ROOT_DIR = Path(__file__).resolve().parent
+except NameError:  # pragma: no cover - when spec executed without __file__
+    ROOT_DIR = Path.cwd()
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
