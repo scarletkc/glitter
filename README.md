@@ -75,7 +75,7 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 ## Usage
 
 - [1] List peers: Show online devices (name/IP/version)
-- [2] Send file: Select a peer and input a path (quotes are allowed)
+- [2] Send file: Select a peer or enter an IP(v4/v6:port) and input a path (quotes are allowed)
 - [3] Incoming requests: Review transfer requests; Accept/Decline and choose a save directory
 - [4] Check updates: Open‑source repo link and latest version info
 - [5] History: Show the latest transfer records

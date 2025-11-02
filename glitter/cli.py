@@ -4,6 +4,7 @@ Interactive CLI for the Glitter LAN file transfer tool.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import sys
@@ -132,6 +133,8 @@ class GlitterApp:
         self.ui = ui or TerminalUI()
         self._identity_public = identity_public or b""
         self._trust_store = trust_store
+        self._manual_peer_ids: dict[str, str] = {}
+        self._manual_peer_lock = threading.Lock()
 
         if isinstance(transfer_port, int) and 1 <= transfer_port <= 65535:
             preferred_port = transfer_port
@@ -188,6 +191,16 @@ class GlitterApp:
         if not isinstance(peer_id, str) or not peer_id:
             return True
         return self._trust_store.get(peer_id) is None
+
+    def cached_peer_id_for_ip(self, ip: str) -> Optional[str]:
+        with self._manual_peer_lock:
+            return self._manual_peer_ids.get(ip)
+
+    def remember_peer_id_for_ip(self, ip: str, peer_id: str) -> None:
+        if not peer_id:
+            return
+        with self._manual_peer_lock:
+            self._manual_peer_ids[ip] = peer_id
 
     def clear_trusted_fingerprints(self) -> bool:
         if not self._trust_store:
@@ -276,7 +289,7 @@ class GlitterApp:
         file_path: Path,
         progress_cb: Optional[Callable[[int, int], None]] = None,
         cancel_event: Optional[threading.Event] = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, Optional[str]]:
         return self._transfer_service.send_file(
             peer.ip,
             peer.transfer_port,
@@ -508,24 +521,118 @@ def list_peers_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
 
 def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     peers = app.list_peers()
-    if not peers:
+    default_port = app.transfer_port
+    if peers:
+        list_peers_cli(ui, app, language)
+    else:
         ui.print(get_message("no_peers", language))
-        return
-    list_peers_cli(ui, app, language)
+        ui.print(get_message("manual_target_hint", language))
+    ui.blank()
+
+    def parse_manual_target(raw: str) -> Optional[dict[str, object]]:
+        """Validate manual IPv4/IPv6 input and optional port."""
+        text = raw.strip()
+        if not text:
+            return None
+        port = default_port
+        normalized_ip: Optional[str] = None
+        if text.startswith("["):
+            closing = text.find("]")
+            if closing == -1:
+                return None
+            host_part = text[1:closing].strip()
+            remainder = text[closing + 1 :].strip()
+            if remainder:
+                if not remainder.startswith(":"):
+                    return None
+                port_text = remainder[1:].strip()
+                if not port_text.isdigit():
+                    return None
+                port = int(port_text)
+            try:
+                normalized_ip = ipaddress.ip_address(host_part).compressed
+            except ValueError:
+                return None
+            if not (1 <= port <= 65535):
+                return None
+            return {
+                "ip": normalized_ip,
+                "port": port,
+                "display": text,
+                "normalized_ip": normalized_ip,
+            }
+
+        host_candidate = text
+        if ":" in text:
+            possible_host, possible_port = text.rsplit(":", 1)
+            possible_host = possible_host.strip()
+            possible_port = possible_port.strip()
+            if possible_port.isdigit():
+                port_candidate = int(possible_port)
+                if not (1 <= port_candidate <= 65535):
+                    return None
+                try:
+                    normalized_candidate = ipaddress.ip_address(possible_host).compressed
+                except ValueError:
+                    pass
+                else:
+                    host_candidate = possible_host
+                    port = port_candidate
+                    normalized_ip = normalized_candidate
+        host_candidate = host_candidate.strip()
+        try:
+            normalized_ip = ipaddress.ip_address(host_candidate).compressed
+        except ValueError:
+            return None
+        if not (1 <= port <= 65535):
+            return None
+        return {
+            "ip": normalized_ip,
+            "port": port,
+            "display": text,
+            "normalized_ip": normalized_ip,
+        }
+
+    selected_peer: Optional[PeerInfo] = None
+    manual_selection = False
+    manual_target_info: Optional[dict[str, object]] = None
     while True:
-        choice = ui.input(get_message("prompt_peer_index", language)).strip()
+        prompt = get_message("prompt_peer_target", language, port=default_port)
+        choice = ui.input(prompt).strip()
         if not choice:
             ui.print(get_message("operation_cancelled", language))
             return
-        if not choice.isdigit():
-            ui.print(get_message("invalid_choice", language))
-            continue
-        idx = int(choice) - 1
-        if 0 <= idx < len(peers):
+        if choice.isdigit() and peers:
+            idx = int(choice) - 1
+            if 0 <= idx < len(peers):
+                selected_peer = peers[idx]
+                break
+        manual_target = parse_manual_target(choice)
+        if manual_target:
+            normalized_ip = manual_target["ip"]
+            cached_peer_id = app.cached_peer_id_for_ip(normalized_ip)
+            peer_identifier = cached_peer_id or f"manual:{normalized_ip}:{manual_target['port']}"
+            selected_peer = PeerInfo(
+                peer_id=peer_identifier,
+                name=manual_target["display"],
+                ip=normalized_ip,
+                transfer_port=manual_target["port"],
+                language=language,
+                version=__version__,
+                last_seen=time.time(),
+            )
+            manual_target_info = manual_target
+            if cached_peer_id:
+                selected_peer.peer_id = cached_peer_id
+            manual_selection = True
             break
-        ui.print(get_message("invalid_choice", language))
-    peer = peers[idx]
-    if peer.version != __version__:
+        ui.print(get_message("invalid_peer_target", language))
+
+    peer = selected_peer
+    if peer is None:
+        ui.print(get_message("operation_cancelled", language))
+        return
+    if not manual_selection and peer.version != __version__:
         ui.print(
             get_message(
                 "version_mismatch_send",
@@ -603,7 +710,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
 
     def worker() -> None:
         try:
-            result, file_hash = app.send_file(
+            result, file_hash, responder_id = app.send_file(
                 peer,
                 file_path,
                 progress_cb=report_progress,
@@ -611,6 +718,8 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
             result_holder["result"] = result
             result_holder["hash"] = file_hash
+            if responder_id:
+                result_holder["responder_id"] = responder_id
         except TransferCancelled as exc:
             result_holder["cancelled"] = True
             result_holder["hash"] = getattr(exc, "file_hash", None)
@@ -633,6 +742,17 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     final_size = last_progress["total"] if last_progress["total"] >= 0 else file_size
     if progress_shown["value"]:
         ui.blank()
+
+    responder_id_obj = result_holder.get("responder_id")
+    if (
+        manual_selection
+        and manual_target_info
+        and isinstance(manual_target_info.get("normalized_ip"), str)
+        and isinstance(responder_id_obj, str)
+    ):
+        normalized_ip = manual_target_info["normalized_ip"]  # type: ignore[index]
+        app.remember_peer_id_for_ip(normalized_ip, responder_id_obj)
+        peer.peer_id = responder_id_obj
 
     if result_holder.get("cancelled"):
         ui.print(get_message("send_cancelled", language))

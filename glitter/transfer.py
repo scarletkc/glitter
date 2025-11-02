@@ -248,7 +248,7 @@ class TransferService:
         file_path: Path,
         progress_cb: Optional[Callable[[int, int], None]] = None,
         cancel_event: Optional[threading.Event] = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, Optional[str]]:
         if not file_path.exists():
             raise FileNotFoundError(f"path does not exist: {file_path}")
 
@@ -313,6 +313,7 @@ class TransferService:
             metadata["original_size"] = original_size
         message = json.dumps(metadata, ensure_ascii=False) + "\n"
 
+        responder_id: Optional[str] = None
         try:
             with socket.create_connection((target_ip, target_port), timeout=10) as sock:
                 # Allow ample time for the receiver to review and accept the transfer
@@ -346,7 +347,7 @@ class TransferService:
                     break
                 cipher: Optional[StreamCipher] = None
                 if response == "DECLINE":
-                    return "declined", file_hash
+                    return "declined", file_hash, responder_id
                 if not response.startswith("ACCEPT"):
                     raise RuntimeError(f"unexpected response: {response}")
                 payload_text = response[6:].strip()
@@ -426,7 +427,7 @@ class TransferService:
                     sock.shutdown(socket.SHUT_WR)
                 except OSError:
                     pass
-                return "accepted", file_hash
+                return "accepted", file_hash, responder_id
         finally:
             if cleanup_path:
                 with contextlib.suppress(OSError):
