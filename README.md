@@ -95,7 +95,6 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 
 ## Roadmap / Ideas
 
-- Optional PSK/cert‑based identity verification
 - Drag‑and‑drop TUI, multi‑file queue
 - Service mode and auto‑accept rules
 
