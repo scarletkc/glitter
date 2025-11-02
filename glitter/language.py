@@ -1,10 +1,10 @@
-"""
-Language support primitives for Glitter CLI prompts.
-"""
+"""Language support primitives for Glitter CLI prompts with Rich styling."""
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
+
+from rich.text import Text
 
 # Supported interface languages
 LANGUAGES: Dict[str, str] = {
@@ -185,3 +185,101 @@ def get_message(key: str, language: str, **kwargs: object) -> str:
     lang_messages = MESSAGES.get(language, MESSAGES["en"])
     template = lang_messages.get(key, MESSAGES["en"].get(key, key))
     return template.format(**kwargs)
+
+
+TONE_STYLES: Dict[str, str] = {
+    "banner": "bold cyan",
+    "heading": "bold bright_cyan",
+    "info": "bright_black",
+    "success": "bold green",
+    "warning": "bold yellow",
+    "error": "bold red",
+    "prompt": "cyan",
+}
+
+
+MESSAGE_TONES: Dict[str, str] = {
+    "welcome": "",
+    "select_language": "",
+    "menu_header": "",
+    "menu_options": "",
+    "menu_pending": "",
+    "prompt_choice": "",
+    "prompt_peer_target": "",
+    "prompt_device_name": "",
+    "prompt_language_choice": "",
+    "prompt_file_path": "",
+    "prompt_pending_choice": "",
+    "prompt_accept": "",
+    "prompt_save_dir": "",
+    "prompt_transfer_port": "",
+    "settings_prompt": "",
+    "settings_clear_confirm": "",
+    "settings_trust_clear_confirm": "",
+    "settings_encryption_prompt": "",
+    "manual_target_hint": "",
+    "cancel_hint": "",
+    "invalid_choice": "",
+    "invalid_peer_target": "",
+    "file_not_found": "",
+    "operation_cancelled": "",
+    "no_peers": "",
+    "no_pending": "",
+    "peer_timeout": "",
+    "incoming_notice": "",
+    "incoming_cancelled": "",
+    "waiting_for_decision": "",
+    "waiting_recipient": "",
+    "recipient_accepted": "",
+    "send_success": "",
+    "receive_done": "",
+    "send_declined": "",
+    "receive_declined": "",
+    "send_failed": "",
+    "receive_failed": "",
+    "fingerprint_new": "",
+    "fingerprint_changed": "",
+    "fingerprint_missing": "",
+    "fingerprint_unknown": "",
+    "settings_history_cleared": "",
+    "settings_trust_cleared": "",
+    "settings_language_updated": "",
+    "settings_device_updated": "",
+    "settings_port_updated": "",
+    "settings_port_failed": "",
+    "settings_port_invalid": "",
+    "settings_port_same": "",
+    "settings_encryption_updated": "",
+    "goodbye": "",
+    "current_version": "",
+    "latest_version": "",
+    "update_check_failed": "",
+    "updates_info": "",
+    "history_header": "",
+    "history_empty": "",
+    "history_entry_send": "",
+    "history_entry_receive": "",
+    "history_entry_failed": "",
+    "pending_header": "",
+    "pending_entry": "",
+    "progress_line": "",
+}
+
+
+def render_message(
+    key: str,
+    language: str,
+    *,
+    tone: Optional[str] = None,
+    **kwargs: object,
+) -> Text:
+    """Return a Rich Text object for the requested message with consistent styling."""
+
+    message = get_message(key, language, **kwargs)
+    text = Text(message)
+    resolved_tone = tone or MESSAGE_TONES.get(key)
+    if resolved_tone:
+        style = TONE_STYLES.get(resolved_tone, resolved_tone)
+        if style:
+            text.stylize(style)
+    return text

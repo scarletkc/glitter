@@ -47,7 +47,7 @@ VERSION_INFO = VSVersionInfo(
                     "040904B0",
                     [
                         StringStruct("CompanyName", "ScarletKc"),
-                        StringStruct("FileDescription", "A Simple LAN File Transfer CLI."),
+                        StringStruct("FileDescription", "Simple LAN File Transfer CLI."),
                         StringStruct("FileVersion", GLITTER_VERSION),
                         StringStruct("InternalName", "glitter"),
                         StringStruct("LegalCopyright", "Copyright (C) ScarletKc"),

@@ -16,7 +16,8 @@ from typing import Callable, Optional
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from rich.console import Console
+from rich.console import Console, RenderableType
+from rich.text import Text
 
 from . import __version__
 from .config import AppConfig, load_config, save_config
@@ -29,7 +30,7 @@ from .history import (
     load_records,
     now_iso,
 )
-from .language import LANGUAGES, get_message
+from .language import LANGUAGES, get_message, render_message
 from .transfer import (
     DEFAULT_TRANSFER_PORT,
     FingerprintMismatchError,
@@ -60,17 +61,15 @@ class TerminalUI:
     """Thin wrapper around rich.Console to standardize CLI I/O."""
 
     def __init__(self, console: Optional[Console] = None) -> None:
-        self._console = console or Console(markup=False, highlight=False, soft_wrap=True)
+        self._console = console or Console(markup=True, highlight=False, soft_wrap=True)
         self._lock = threading.Lock()
         self._last_carriage_width = 0
 
-    def print(self, message: str = "", *, end: str = "\n") -> None:
+    def print(self, message: RenderableType = "", *, end: str = "\n") -> None:
         with self._lock:
             self._console.print(
                 message,
                 end=end,
-                markup=False,
-                highlight=False,
                 soft_wrap=True,
             )
             try:
@@ -79,23 +78,29 @@ class TerminalUI:
                 pass
             self._last_carriage_width = 0
 
-    def input(self, prompt: str) -> str:
+    def input(self, prompt: RenderableType) -> str:
         self.flush()
         self._last_carriage_width = 0
-        return self._console.input(prompt, markup=False)
+        return self._console.input(prompt)
 
-    def carriage(self, message: str, padding: str = "") -> None:
+    def carriage(self, message: RenderableType, padding: str = "") -> None:
         with self._lock:
-            rendered = message + padding
-            residual = self._last_carriage_width - len(rendered)
+            with self._console.capture() as capture:
+                self._console.print(message, end="", soft_wrap=True)
+            rendered = capture.get()
+            visible_width = Text.from_ansi(rendered).cell_len
+            padding_text = padding
+            padding_width = len(padding_text)
+            residual = self._last_carriage_width - (visible_width + padding_width)
             if residual > 0:
-                rendered = rendered + (" " * residual)
+                padding_text += " " * residual
+                padding_width += residual
             try:
-                self._console.file.write("\r" + rendered)
+                self._console.file.write("\r" + rendered + padding_text)
                 self._console.file.flush()
             except Exception:  # noqa: BLE001
                 pass
-            self._last_carriage_width = len(rendered)
+            self._last_carriage_width = visible_width + padding_width
 
     def blank(self) -> None:
         self.print()
@@ -107,6 +112,19 @@ class TerminalUI:
             except Exception:  # noqa: BLE001
                 pass
             self._last_carriage_width = 0
+
+
+def show_message(
+    ui: TerminalUI,
+    key: str,
+    language: str,
+    *,
+    tone: Optional[str] = None,
+    **kwargs: object,
+) -> None:
+    """Helper to print a localized message with consistent styling."""
+
+    ui.print(render_message(key, language, tone=tone, **kwargs))
 
 
 class GlitterApp:
@@ -373,7 +391,7 @@ class GlitterApp:
         with self._incoming_lock:
             self._incoming_counter += 1
         display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-        message = get_message(
+        message = render_message(
             "incoming_notice",
             self.language,
             filename=display_name,
@@ -386,7 +404,7 @@ class GlitterApp:
         self.ui.flush()
         if ticket.sender_version and ticket.sender_version != __version__:
             self.ui.print(
-                get_message(
+                render_message(
                     "incoming_version_warning",
                     self.language,
                     version=ticket.sender_version,
@@ -394,12 +412,12 @@ class GlitterApp:
                 )
             )
             self.ui.flush()
-        self.ui.print(get_message("waiting_for_decision", self.language))
+        show_message(self.ui, "waiting_for_decision", self.language)
         self.ui.flush()
 
     def _handle_request_cancelled(self, ticket: TransferTicket) -> None:
         display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-        message = get_message(
+        message = render_message(
             "incoming_cancelled",
             self.language,
             filename=display_name,
@@ -435,12 +453,16 @@ def prompt_language_choice(
     ui: TerminalUI, default: str, allow_cancel: bool = False
 ) -> Optional[str]:
     while True:
-        ui.print(get_message("select_language", default))
+        show_message(ui, "select_language", default)
         for code, label in LANGUAGES.items():
-            ui.print(f"  {code} - {label}")
+            entry = Text("  ")
+            entry.append(code, style="bold cyan")
+            entry.append(" - ")
+            entry.append(label, style="bright_white")
+            ui.print(entry)
         try:
             choice_raw = ui.input(
-                get_message("prompt_language_choice", default, default=default)
+                render_message("prompt_language_choice", default, default=default)
             )
         except (KeyboardInterrupt, EOFError):
             ui.blank()
@@ -452,7 +474,7 @@ def prompt_language_choice(
             return default
         if choice in LANGUAGES:
             return choice
-        ui.print(get_message("invalid_choice", default))
+        show_message(ui, "invalid_choice", default)
 
 
 def choose_language(ui: TerminalUI) -> str:
@@ -467,7 +489,7 @@ def prompt_device_name(
     default_name: Optional[str] = None,
 ) -> Optional[str]:
     default_name = default_name or default_device_name()
-    prompt = get_message("prompt_device_name", language, default=default_name)
+    prompt = render_message("prompt_device_name", language, default=default_name)
     try:
         name_input = ui.input(prompt)
     except (KeyboardInterrupt, EOFError):
@@ -483,34 +505,36 @@ def prompt_device_name(
 
 def display_menu(ui: TerminalUI, language: str, has_pending: int) -> None:
     ui.blank()
-    ui.print(get_message("menu_header", language))
-    text = get_message("menu_options", language)
+    show_message(ui, "menu_header", language)
+    text = render_message("menu_options", language)
     if has_pending:
-        text += get_message("menu_pending", language, count=has_pending)
+        text.append_text(
+            render_message("menu_pending", language, count=has_pending)
+        )
     ui.print(text)
 
 
 def list_peers_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     peers = app.list_peers()
     if not peers:
-        ui.print(get_message("no_peers", language))
+        show_message(ui, "no_peers", language)
         return
     now = time.time()
     for index, peer in enumerate(peers, start=1):
         seconds = seconds_since(peer.last_seen)
-        message = get_message(
+        message = render_message(
             "peer_entry",
             language,
             index=index,
             name=peer.name,
             ip=peer.ip,
-            seconds=seconds,
+            seconds=int(seconds),
             version=peer.version,
         )
         ui.print(message)
-        if peer.version != __version__:
+        if peer.version and peer.version != __version__:
             ui.print(
-                get_message(
+                render_message(
                     "peer_version_warning",
                     language,
                     version=peer.version,
@@ -525,8 +549,8 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     if peers:
         list_peers_cli(ui, app, language)
     else:
-        ui.print(get_message("no_peers", language))
-        ui.print(get_message("manual_target_hint", language))
+        show_message(ui, "no_peers", language)
+        show_message(ui, "manual_target_hint", language)
     ui.blank()
 
     def parse_manual_target(raw: str) -> Optional[dict[str, object]]:
@@ -597,10 +621,10 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     manual_selection = False
     manual_target_info: Optional[dict[str, object]] = None
     while True:
-        prompt = get_message("prompt_peer_target", language, port=default_port)
+        prompt = render_message("prompt_peer_target", language, port=default_port)
         choice = ui.input(prompt).strip()
         if not choice:
-            ui.print(get_message("operation_cancelled", language))
+            show_message(ui, "operation_cancelled", language)
             return
         if choice.isdigit() and peers:
             idx = int(choice) - 1
@@ -626,15 +650,15 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 selected_peer.peer_id = cached_peer_id
             manual_selection = True
             break
-        ui.print(get_message("invalid_peer_target", language))
+        show_message(ui, "invalid_peer_target", language)
 
     peer = selected_peer
     if peer is None:
-        ui.print(get_message("operation_cancelled", language))
+        show_message(ui, "operation_cancelled", language)
         return
     if not manual_selection and peer.version != __version__:
         ui.print(
-            get_message(
+            render_message(
                 "version_mismatch_send",
                 language,
                 version=peer.version,
@@ -642,18 +666,18 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
         )
     while True:
-        raw_input_path = ui.input(get_message("prompt_file_path", language))
+        raw_input_path = ui.input(render_message("prompt_file_path", language))
         file_input = raw_input_path.strip().strip('"').strip("'")
         if not file_input:
-            ui.print(get_message("operation_cancelled", language))
+            show_message(ui, "operation_cancelled", language)
             return
         file_path = Path(file_input).expanduser()
         if file_path.exists() and (file_path.is_file() or file_path.is_dir()):
             break
-        ui.print(get_message("file_not_found", language))
+        show_message(ui, "file_not_found", language)
     display_name = file_path.name + ("/" if file_path.is_dir() else "")
     ui.print(
-        get_message(
+        render_message(
             "sending",
             language,
             filename=display_name,
@@ -661,11 +685,11 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             ip=peer.ip,
         )
     )
-    ui.print(get_message("waiting_recipient", language))
+    show_message(ui, "waiting_recipient", language)
     fingerprint = app.identity_fingerprint()
     if fingerprint and app.should_show_local_fingerprint(peer):
-        ui.print(get_message("local_fingerprint", language, fingerprint=fingerprint))
-    ui.print(get_message("cancel_hint", language))
+        ui.print(render_message("local_fingerprint", language, fingerprint=fingerprint))
+    show_message(ui, "cancel_hint", language)
     last_progress = {"sent": -1, "total": -1, "time": None}
     throttle = {"min_interval": 0.1, "min_bytes": 512 * 1024}
     progress_shown = {"value": False}
@@ -681,7 +705,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 if prev >= 0 and (sent - prev) < throttle["min_bytes"]:
                     return
         if not handshake_announced["value"] and last_progress["sent"] < 0:
-            ui.print(get_message("recipient_accepted", language))
+            show_message(ui, "recipient_accepted", language)
             handshake_announced["value"] = True
         previous_sent = last_progress["sent"]
         delta_bytes = sent - previous_sent if previous_sent >= 0 else 0
@@ -691,16 +715,16 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         last_progress["total"] = total
         last_progress["time"] = now
         progress_shown["value"] = True
-        message = get_message(
+        message = render_message(
             "progress_line",
             language,
             transferred=format_size(sent),
             total=format_size(total),
             rate=format_rate(rate),
         )
-        if len(message) > line_width["value"]:
-            line_width["value"] = len(message)
-        padding = " " * max(0, line_width["value"] - len(message))
+        if len(message.plain) > line_width["value"]:
+            line_width["value"] = len(message.plain)
+        padding = " " * max(0, line_width["value"] - len(message.plain))
         ui.carriage(message, padding)
 
     file_size = file_path.stat().st_size if file_path.is_file() else 0
@@ -755,7 +779,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         peer.peer_id = responder_id_obj
 
     if result_holder.get("cancelled"):
-        ui.print(get_message("send_cancelled", language))
+        show_message(ui, "send_cancelled", language)
         app.log_history(
             direction="send",
             status="cancelled",
@@ -779,7 +803,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         else:
             expected = actual = "?"
         ui.print(
-            get_message(
+            render_message(
                 "send_fingerprint_mismatch",
                 language,
                 expected=expected,
@@ -803,7 +827,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
 
     if "exception" in result_holder:
         exc = result_holder["exception"]
-        ui.print(get_message("send_failed", language, error=exc))
+        ui.print(render_message("send_failed", language, error=exc))
         app.log_history(
             direction="send",
             status=f"error: {exc}",
@@ -821,7 +845,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
 
     result = result_holder.get("result")
     if result == "declined":
-        ui.print(get_message("send_declined", language))
+        show_message(ui, "send_declined", language)
         app.log_history(
             direction="send",
             status="declined",
@@ -835,7 +859,7 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             remote_version=peer.version,
         )
     else:
-        ui.print(get_message("send_success", language))
+        show_message(ui, "send_success", language)
         app.log_history(
             direction="send",
             status="completed",
@@ -854,12 +878,12 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
 def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
     tickets = app.pending_requests()
     if not tickets:
-        ui.print(get_message("no_pending", language))
+        show_message(ui, "no_pending", language)
         return
     app.reset_incoming_count()
     for index, ticket in enumerate(tickets, start=1):
         display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-        message = get_message(
+        message = render_message(
             "pending_entry",
             language,
             index=index,
@@ -868,15 +892,16 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             name=ticket.sender_name,
         )
         if app.debug:
-            message += get_message(
+            debug_suffix = render_message(
                 "pending_debug_suffix",
                 language,
                 request_id=ticket.request_id,
             )
+            message.append_text(debug_suffix)
         ui.print(message)
         if ticket.sender_version and ticket.sender_version != __version__:
             ui.print(
-                get_message(
+                render_message(
                     "incoming_version_warning",
                     language,
                     version=ticket.sender_version,
@@ -885,7 +910,7 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
         if ticket.identity_status == "new" and ticket.identity_fingerprint:
             ui.print(
-                get_message(
+                render_message(
                     "fingerprint_new",
                     language,
                     fingerprint=ticket.identity_fingerprint,
@@ -893,7 +918,7 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
         elif ticket.identity_status == "changed":
             ui.print(
-                get_message(
+                render_message(
                     "fingerprint_changed",
                     language,
                     old=ticket.identity_previous_fingerprint or "-",
@@ -901,34 +926,34 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 )
             )
         elif ticket.identity_status == "missing":
-            ui.print(get_message("fingerprint_missing", language))
+            show_message(ui, "fingerprint_missing", language)
         elif ticket.identity_status == "unknown":
-            ui.print(get_message("fingerprint_unknown", language))
+            show_message(ui, "fingerprint_unknown", language)
     while True:
-        choice = ui.input(get_message("prompt_pending_choice", language)).strip()
+        choice = ui.input(render_message("prompt_pending_choice", language)).strip()
         if not choice:
             return
         if not choice.isdigit():
-            ui.print(get_message("invalid_choice", language))
+            show_message(ui, "invalid_choice", language)
             continue
         idx = int(choice) - 1
         if 0 <= idx < len(tickets):
             break
-        ui.print(get_message("invalid_choice", language))
+        show_message(ui, "invalid_choice", language)
     ticket = tickets[idx]
     display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
     while True:
-        action = ui.input(get_message("prompt_accept", language)).strip().lower()
+        action = ui.input(render_message("prompt_accept", language)).strip().lower()
         if not action:
-            ui.print(get_message("operation_cancelled", language))
+            show_message(ui, "operation_cancelled", language)
             return
         if action in {"a", "d"}:
             break
-        ui.print(get_message("invalid_choice", language))
+        show_message(ui, "invalid_choice", language)
     if action == "a":
         default_dir = app.default_download_dir
         dest = ui.input(
-            get_message(
+            render_message(
                 "prompt_save_dir",
                 language,
                 default=str(default_dir),
@@ -940,13 +965,13 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             destination = default_dir
         accepted_ticket = app.accept_request(ticket.request_id, destination)
         if not accepted_ticket:
-            ui.print(get_message("invalid_choice", language))
+            show_message(ui, "invalid_choice", language)
             return
-        ui.print(get_message("receive_started", language, filename=display_name))
+        show_message(ui, "receive_started", language, filename=display_name)
         wait_for_completion(ui, accepted_ticket, language)
         if accepted_ticket.status == "completed" and accepted_ticket.saved_path:
             ui.print(
-                get_message(
+                render_message(
                     "receive_done",
                     language,
                     path=str(accepted_ticket.saved_path),
@@ -965,7 +990,13 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 remote_version=ticket.sender_version,
             )
         elif accepted_ticket.status == "failed":
-            ui.print(get_message("receive_failed", language, error=accepted_ticket.error))
+            ui.print(
+                render_message(
+                    "receive_failed",
+                    language,
+                    error=accepted_ticket.error,
+                )
+            )
             app.log_history(
                 direction="receive",
                 status=accepted_ticket.error or "failed",
@@ -979,7 +1010,13 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 remote_version=ticket.sender_version,
             )
         else:
-            ui.print(get_message("receive_failed", language, error="unknown state"))
+            ui.print(
+                render_message(
+                    "receive_failed",
+                    language,
+                    error="unknown state",
+                )
+            )
             app.log_history(
                 direction="receive",
                 status=accepted_ticket.status,
@@ -994,7 +1031,7 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
     elif action == "d":
         if app.decline_request(ticket.request_id):
-            ui.print(get_message("receive_declined", language))
+            show_message(ui, "receive_declined", language)
             app.log_history(
                 direction="receive",
                 status="declined",
@@ -1008,7 +1045,7 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                 remote_version=ticket.sender_version,
             )
         else:
-            ui.print(get_message("invalid_choice", language))
+            show_message(ui, "invalid_choice", language)
 
 
 def _extract_version_from_source(source: str) -> Optional[str]:
@@ -1040,21 +1077,27 @@ def _fetch_remote_version(
 
 
 def show_updates(ui: TerminalUI, language: str) -> None:
-    ui.print(get_message("current_version", language, version=__version__))
+    show_message(ui, "current_version", language, version=__version__)
     remote_version, error = _fetch_remote_version()
     if remote_version:
-        ui.print(get_message("latest_version", language, version=remote_version))
+        show_message(ui, "latest_version", language, version=remote_version)
     else:
-        ui.print(get_message("update_check_failed", language, error=error or "unknown"))
-    ui.print(get_message("updates_info", language))
+        ui.print(
+            render_message(
+                "update_check_failed",
+                language,
+                error=error or "unknown",
+            )
+        )
+    show_message(ui, "updates_info", language)
 
 
 def show_history(ui: TerminalUI, language: str, limit: int = 20) -> None:
     records = load_records(limit)
     if not records:
-        ui.print(get_message("history_empty", language))
+        show_message(ui, "history_empty", language)
         return
-    ui.print(get_message("history_header", language))
+    show_message(ui, "history_header", language)
     for record in reversed(records):
         time_text = format_timestamp(record.timestamp)
         size_text = format_size(record.size)
@@ -1063,7 +1106,7 @@ def show_history(ui: TerminalUI, language: str, limit: int = 20) -> None:
             if language == "zh":
                 direction_label = "发送" if record.direction == "send" else "接收"
             ui.print(
-                get_message(
+                render_message(
                     "history_entry_failed",
                     language,
                     direction=direction_label,
@@ -1077,7 +1120,7 @@ def show_history(ui: TerminalUI, language: str, limit: int = 20) -> None:
             continue
         if record.direction == "send":
             ui.print(
-                get_message(
+                render_message(
                     "history_entry_send",
                     language,
                     time=time_text,
@@ -1089,7 +1132,7 @@ def show_history(ui: TerminalUI, language: str, limit: int = 20) -> None:
             )
         else:
             ui.print(
-                get_message(
+                render_message(
                     "history_entry_receive",
                     language,
                     time=time_text,
@@ -1113,7 +1156,7 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             language,
         )
         ui.print(
-            get_message(
+            render_message(
                 "settings_header",
                 language,
                 language_name=lang_name,
@@ -1123,9 +1166,9 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 encryption=encryption_label,
             )
         )
-        ui.print(get_message("settings_options", language))
+        show_message(ui, "settings_options", language)
         try:
-            choice = ui.input(get_message("settings_prompt", language)).strip()
+            choice = ui.input(render_message("settings_prompt", language)).strip()
         except (KeyboardInterrupt, EOFError):
             ui.blank()
             return language
@@ -1133,35 +1176,41 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             default_lang = config.language or language or "en"
             new_lang = prompt_language_choice(ui, default_lang, allow_cancel=True)
             if not new_lang:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if new_lang == config.language:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             config.language = new_lang
             save_config(config)
             app.update_identity(config.device_name or app.device_name, new_lang)
             language = new_lang
             lang_name = LANGUAGES.get(new_lang, new_lang)
-            ui.print(get_message("settings_language_updated", language, language_name=lang_name))
+            ui.print(
+                render_message(
+                    "settings_language_updated",
+                    language,
+                    language_name=lang_name,
+                )
+            )
         elif choice == "2":
             default_name = config.device_name or app.device_name
             new_name = prompt_device_name(ui, language, allow_cancel=True, default_name=default_name)
             if new_name is None:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if new_name == config.device_name:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             config.device_name = new_name
             save_config(config)
             app.update_identity(new_name, language)
-            ui.print(get_message("settings_device_updated", language, name=new_name))
+            ui.print(render_message("settings_device_updated", language, name=new_name))
         elif choice == "3":
             current_port = app.transfer_port
             try:
                 port_input = ui.input(
-                    get_message(
+                    render_message(
                         "prompt_transfer_port",
                         language,
                         current=current_port,
@@ -1169,29 +1218,29 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 ).strip()
             except (KeyboardInterrupt, EOFError):
                 ui.blank()
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if not port_input:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if not port_input.isdigit():
-                ui.print(get_message("settings_port_invalid", language))
+                show_message(ui, "settings_port_invalid", language)
                 continue
             new_port = int(port_input)
             if not (1 <= new_port <= 65535):
-                ui.print(get_message("settings_port_invalid", language))
+                show_message(ui, "settings_port_invalid", language)
                 continue
             if new_port == current_port and not app.allows_ephemeral_fallback:
-                ui.print(get_message("settings_port_same", language))
+                show_message(ui, "settings_port_same", language)
                 continue
             try:
                 actual_port = app.change_transfer_port(new_port)
             except ValueError:
-                ui.print(get_message("settings_port_invalid", language))
+                show_message(ui, "settings_port_invalid", language)
                 continue
             except OSError as exc:
                 ui.print(
-                    get_message(
+                    render_message(
                         "settings_port_failed",
                         language,
                         port=new_port,
@@ -1201,19 +1250,21 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 continue
             config.transfer_port = actual_port
             save_config(config)
-            ui.print(get_message("settings_port_updated", language, port=actual_port))
+            ui.print(render_message("settings_port_updated", language, port=actual_port))
         elif choice == "4":
             try:
-                confirm = ui.input(get_message("settings_clear_confirm", language)).strip().lower()
+                confirm = ui.input(
+                    render_message("settings_clear_confirm", language)
+                ).strip().lower()
             except (KeyboardInterrupt, EOFError):
                 ui.blank()
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if confirm in {"y", "yes", "是", "shi", "s"}:
                 clear_history()
-                ui.print(get_message("settings_history_cleared", language))
+                show_message(ui, "settings_history_cleared", language)
             else:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
         elif choice == "5":
             current_label = get_message(
                 "settings_encryption_on" if app.encryption_enabled else "settings_encryption_off",
@@ -1221,7 +1272,7 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             )
             try:
                 answer = ui.input(
-                    get_message(
+                    render_message(
                         "settings_encryption_prompt",
                         language,
                         state=current_label,
@@ -1229,20 +1280,20 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 ).strip().lower()
             except (KeyboardInterrupt, EOFError):
                 ui.blank()
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if not answer:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if answer in {"y", "yes", "true", "on", "1", "是", "shi"}:
                 desired = True
             elif answer in {"n", "no", "false", "off", "0", "否", "fou"}:
                 desired = False
             else:
-                ui.print(get_message("invalid_choice", language))
+                show_message(ui, "invalid_choice", language)
                 continue
             if desired == app.encryption_enabled:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             app.set_encryption_enabled(desired)
             config.encryption_enabled = desired
@@ -1252,7 +1303,7 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 language,
             )
             ui.print(
-                get_message(
+                render_message(
                     "settings_encryption_updated",
                     language,
                     state=updated_label,
@@ -1261,23 +1312,23 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
         elif choice == "6":
             try:
                 confirm = ui.input(
-                    get_message("settings_trust_clear_confirm", language)
+                    render_message("settings_trust_clear_confirm", language)
                 ).strip().lower()
             except (KeyboardInterrupt, EOFError):
                 ui.blank()
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
                 continue
             if confirm in {"y", "yes", "是", "shi", "s"}:
                 if app.clear_trusted_fingerprints():
-                    ui.print(get_message("settings_trust_cleared", language))
+                    show_message(ui, "settings_trust_cleared", language)
                 else:
-                    ui.print(get_message("operation_cancelled", language))
+                    show_message(ui, "operation_cancelled", language)
             else:
-                ui.print(get_message("operation_cancelled", language))
+                show_message(ui, "operation_cancelled", language)
         elif choice == "7":
             return language
         else:
-            ui.print(get_message("invalid_choice", language))
+            show_message(ui, "invalid_choice", language)
 
 
 def wait_for_completion(
@@ -1301,16 +1352,16 @@ def wait_for_completion(
                 delta_bytes = sent - last_sent if last_sent >= 0 else 0
                 delta_time = time_since if time_since and time_since > 0 else 0.0
                 rate = delta_bytes / delta_time if delta_time > 0 else 0.0
-                message = get_message(
+                message = render_message(
                     "progress_line",
                     language,
                     transferred=format_size(sent),
                     total=format_size(total),
                     rate=format_rate(rate),
                 )
-                if len(message) > line_width:
-                    line_width = len(message)
-                padding = " " * max(0, line_width - len(message))
+                if len(message.plain) > line_width:
+                    line_width = len(message.plain)
+                padding = " " * max(0, line_width - len(message.plain))
                 ui.carriage(message, padding)
                 last_sent = sent
                 last_time = now
@@ -1328,16 +1379,16 @@ def wait_for_completion(
             delta_bytes = final_sent - last_sent if last_sent >= 0 else final_sent
             delta_time = (now - last_time) if last_time else 0.0
             rate = delta_bytes / delta_time if delta_time > 0 else 0.0
-            message = get_message(
+            message = render_message(
                 "progress_line",
                 language,
                 transferred=format_size(final_sent),
                 total=format_size(final_total),
                 rate=format_rate(rate),
             )
-            if len(message) > line_width:
-                line_width = len(message)
-            padding = " " * max(0, line_width - len(message))
+            if len(message.plain) > line_width:
+                line_width = len(message.plain)
+            padding = " " * max(0, line_width - len(message.plain))
             ui.carriage(message, padding)
             progress_shown = True
     if progress_shown:
@@ -1392,13 +1443,20 @@ def run_cli() -> int:
         trust_store=trust_store,
         ui=ui,
     )
-    ui.print(get_message("welcome", language))
-    ui.print(get_message("current_version", language, version=__version__))
+    show_message(ui, "welcome", language)
+    show_message(ui, "current_version", language, version=__version__)
     try:
         app.start()
     except OSError as exc:
         failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
-        ui.print(get_message("settings_port_failed", language, port=failure_port, error=exc))
+        ui.print(
+            render_message(
+                "settings_port_failed",
+                language,
+                port=failure_port,
+                error=exc,
+            )
+        )
         app.stop()
         return 1
     try:
@@ -1406,11 +1464,11 @@ def run_cli() -> int:
             has_pending = len(app.pending_requests())
             try:
                 display_menu(ui, language, has_pending)
-                choice = ui.input(get_message("prompt_choice", language)).strip()
+                choice = ui.input(render_message("prompt_choice", language)).strip()
             except (KeyboardInterrupt, EOFError):
                 app.cancel_pending_requests()
                 ui.blank()
-                ui.print(get_message("goodbye", language))
+                show_message(ui, "goodbye", language)
                 break
             if choice == "1":
                 list_peers_cli(ui, app, language)
@@ -1426,14 +1484,14 @@ def run_cli() -> int:
                 language = settings_menu(ui, app, config, language)
             elif choice == "7":
                 app.cancel_pending_requests()
-                ui.print(get_message("goodbye", language))
+                show_message(ui, "goodbye", language)
                 break
             else:
-                ui.print(get_message("invalid_choice", language))
+                show_message(ui, "invalid_choice", language)
     except KeyboardInterrupt:
         app.cancel_pending_requests()
         ui.blank()
-        ui.print(get_message("goodbye", language))
+        show_message(ui, "goodbye", language)
     finally:
         try:
             app.stop()
