@@ -6,6 +6,7 @@ Glitter is a cross‑platform, terminal‑based tool for sending files over a lo
 - Bilingual UI: English, 中文 (switchable in settings)
 - Peer discovery via UDP broadcast + smart replies
 - Encrypted transfer (DH key exchange + stream cipher)
+- Device fingerprint verification (TOFU) to flag impersonation attempts
 - Integrity check (SHA-256) after receive
 - Directory transfer: send entire folders (auto-zipped, zero compression)
 - Transfer progress and live throughput (e.g. 1.2 MB/s)
@@ -78,12 +79,13 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 - [3] Incoming requests: Review transfer requests; Accept/Decline and choose a save directory
 - [4] Check updates: Open‑source repo link and latest version info
 - [5] History: Show the latest transfer records
-- [6] Settings: Change language/device name/port/encryption, clear history
+- [6] Settings: Change language/device name/port/encryption, clear history or trusted fingerprints
 - [7] Quit: Exit the program
 
 ## Files & Persistence
 
 - Config: `~/.glitter/config.json` (language, device name, transfer port, encryption)
+- Trusted fingerprints: `~/.glitter/known_peers.json` (peer IDs and fingerprints stored after first approval)
 - History: `~/.glitter/history.jsonl` (one JSON per line)
 - Default download folder: `~/Downloads/GlitterDownloads` on Windows, `~/GlitterDownloads` elsewhere
 

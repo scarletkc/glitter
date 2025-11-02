@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Tuple
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 # 2048-bit MODP Group (RFC 3526)
 DH_PRIME = int(
@@ -23,6 +25,10 @@ DH_PRIME = int(
     16,
 )
 DH_GENERATOR = 2
+
+# Identity fingerprint parameters (TOFU)
+FINGERPRINT_BYTES = 10
+_CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 def generate_dh_keypair() -> Tuple[int, int]:
@@ -60,6 +66,50 @@ def encode_bytes(data: bytes) -> str:
 
 def decode_bytes(value: str) -> bytes:
     return base64.urlsafe_b64decode(value.encode("ascii"))
+
+
+def generate_identity_private_key() -> ed25519.Ed25519PrivateKey:
+    """Generate a new Ed25519 private key for device identity."""
+
+    return ed25519.Ed25519PrivateKey.generate()
+
+
+def serialize_identity_private_key(private_key: ed25519.Ed25519PrivateKey) -> str:
+    """Return a base64 string for the given Ed25519 private key."""
+
+    raw = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return encode_bytes(raw)
+
+
+def deserialize_identity_private_key(encoded: str) -> ed25519.Ed25519PrivateKey:
+    """Reconstruct an Ed25519 private key from a base64 string."""
+
+    raw = decode_bytes(encoded)
+    return ed25519.Ed25519PrivateKey.from_private_bytes(raw)
+
+
+def identity_public_bytes(private_key: ed25519.Ed25519PrivateKey) -> bytes:
+    """Return the raw public key bytes for an Ed25519 private key."""
+
+    return private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+
+def fingerprint_from_public_key(public_bytes: bytes, length: int = FINGERPRINT_BYTES) -> tuple[str, str]:
+    """Return (display, hex) fingerprint strings for a public key."""
+
+    digest = hashlib.sha256(public_bytes).digest()
+    if length <= 0 or length > len(digest):
+        length = len(digest)
+    truncated = digest[:length]
+    display = _format_crockford(truncated)
+    return display, digest.hex()
 
 
 def compute_file_sha256(path: Path) -> str:
@@ -111,3 +161,34 @@ def random_nonce(size: int = 16) -> bytes:
 def _int_to_bytes(value: int) -> bytes:
     length = (value.bit_length() + 7) // 8 or 1
     return value.to_bytes(length, "big")
+
+
+def _format_crockford(data: bytes) -> str:
+    """Return Crockford Base32 string grouped with hyphens."""
+
+    encoded = _encode_crockford(data)
+    if not encoded:
+        return ""
+    groups = [encoded[i : i + 4] for i in range(0, len(encoded), 4)]
+    return "-".join(groups)
+
+
+def _encode_crockford(data: bytes) -> str:
+    if not data:
+        return ""
+    bits = 0
+    value = 0
+    output: list[str] = []
+    for byte in data:
+        value = (value << 8) | byte
+        bits += 8
+        while bits >= 5:
+            shift = bits - 5
+            index = (value >> shift) & 0x1F
+            output.append(_CROCKFORD_ALPHABET[index])
+            bits -= 5
+            value &= (1 << bits) - 1 if bits else 0
+    if bits:
+        index = (value << (5 - bits)) & 0x1F
+        output.append(_CROCKFORD_ALPHABET[index])
+    return "".join(output)

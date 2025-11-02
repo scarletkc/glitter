@@ -29,7 +29,20 @@ from .history import (
     now_iso,
 )
 from .language import LANGUAGES, get_message
-from .transfer import DEFAULT_TRANSFER_PORT, TransferCancelled, TransferService, TransferTicket
+from .transfer import (
+    DEFAULT_TRANSFER_PORT,
+    FingerprintMismatchError,
+    TransferCancelled,
+    TransferService,
+    TransferTicket,
+)
+from .security import (
+    deserialize_identity_private_key,
+    generate_identity_private_key,
+    identity_public_bytes,
+    serialize_identity_private_key,
+)
+from .trust import TrustedPeerStore
 from .utils import (
     default_device_name,
     ensure_download_dir,
@@ -100,20 +113,25 @@ class GlitterApp:
 
     def __init__(
         self,
+        device_id: str,
         device_name: str,
         language: str,
         transfer_port: Optional[int] = None,
         debug: bool = False,
         encryption_enabled: bool = True,
+        identity_public: Optional[bytes] = None,
+        trust_store: Optional[TrustedPeerStore] = None,
         ui: Optional[TerminalUI] = None,
     ) -> None:
-        self.device_id = str(uuid.uuid4())
+        self.device_id = device_id
         self.device_name = device_name
         self.language = language
         self.default_download_dir = ensure_download_dir()
         self.debug = debug
         self._encryption_enabled = encryption_enabled
         self.ui = ui or TerminalUI()
+        self._identity_public = identity_public or b""
+        self._trust_store = trust_store
 
         if isinstance(transfer_port, int) and 1 <= transfer_port <= 65535:
             preferred_port = transfer_port
@@ -140,6 +158,8 @@ class GlitterApp:
             bind_port=bind_port,
             allow_ephemeral_fallback=allow_fallback,
             encryption_enabled=self._encryption_enabled,
+            identity_public=self._identity_public,
+            trust_store=self._trust_store,
         )
 
     @property
@@ -157,6 +177,22 @@ class GlitterApp:
     def set_encryption_enabled(self, enabled: bool) -> None:
         self._encryption_enabled = bool(enabled)
         self._transfer_service.set_encryption_enabled(self._encryption_enabled)
+
+    def identity_fingerprint(self) -> Optional[str]:
+        return self._transfer_service.get_identity_fingerprint()
+
+    def should_show_local_fingerprint(self, peer: PeerInfo) -> bool:
+        if not self._trust_store:
+            return True
+        peer_id = getattr(peer, "peer_id", None)
+        if not isinstance(peer_id, str) or not peer_id:
+            return True
+        return self._trust_store.get(peer_id) is None
+
+    def clear_trusted_fingerprints(self) -> bool:
+        if not self._trust_store:
+            return False
+        return self._trust_store.clear()
 
     def change_transfer_port(self, new_port: int) -> int:
         if not (1 <= new_port <= 65535):
@@ -244,6 +280,7 @@ class GlitterApp:
         return self._transfer_service.send_file(
             peer.ip,
             peer.transfer_port,
+            peer.name,
             file_path,
             progress_cb=progress_cb,
             cancel_event=cancel_event,
@@ -518,6 +555,9 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         )
     )
     ui.print(get_message("waiting_recipient", language))
+    fingerprint = app.identity_fingerprint()
+    if fingerprint and app.should_show_local_fingerprint(peer):
+        ui.print(get_message("local_fingerprint", language, fingerprint=fingerprint))
     ui.print(get_message("cancel_hint", language))
     last_progress = {"sent": -1, "total": -1, "time": None}
     throttle = {"min_interval": 0.1, "min_bytes": 512 * 1024}
@@ -574,6 +614,8 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         except TransferCancelled as exc:
             result_holder["cancelled"] = True
             result_holder["hash"] = getattr(exc, "file_hash", None)
+        except FingerprintMismatchError as exc:
+            result_holder["fingerprint_mismatch"] = exc
         except Exception as exc:  # noqa: BLE001
             result_holder["exception"] = exc
 
@@ -597,6 +639,36 @@ def send_file_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
         app.log_history(
             direction="send",
             status="cancelled",
+            filename=transfer_label,
+            size=final_size,
+            sha256=file_hash,
+            remote_name=peer.name,
+            remote_ip=peer.ip,
+            source_path=file_path,
+            target_path=None,
+            remote_version=peer.version,
+        )
+        flush_input_buffer()
+        return
+
+    if "fingerprint_mismatch" in result_holder:
+        mismatch = result_holder["fingerprint_mismatch"]
+        if isinstance(mismatch, FingerprintMismatchError):
+            expected = mismatch.expected
+            actual = mismatch.actual
+        else:
+            expected = actual = "?"
+        ui.print(
+            get_message(
+                "send_fingerprint_mismatch",
+                language,
+                expected=expected,
+                actual=actual,
+            )
+        )
+        app.log_history(
+            direction="send",
+            status="fingerprint_mismatch",
             filename=transfer_label,
             size=final_size,
             sha256=file_hash,
@@ -691,6 +763,27 @@ def handle_requests_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
                     current=__version__,
                 )
             )
+        if ticket.identity_status == "new" and ticket.identity_fingerprint:
+            ui.print(
+                get_message(
+                    "fingerprint_new",
+                    language,
+                    fingerprint=ticket.identity_fingerprint,
+                )
+            )
+        elif ticket.identity_status == "changed":
+            ui.print(
+                get_message(
+                    "fingerprint_changed",
+                    language,
+                    old=ticket.identity_previous_fingerprint or "-",
+                    new=ticket.identity_fingerprint or "-",
+                )
+            )
+        elif ticket.identity_status == "missing":
+            ui.print(get_message("fingerprint_missing", language))
+        elif ticket.identity_status == "unknown":
+            ui.print(get_message("fingerprint_unknown", language))
     while True:
         choice = ui.input(get_message("prompt_pending_choice", language)).strip()
         if not choice:
@@ -1046,6 +1139,22 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
                 )
             )
         elif choice == "6":
+            try:
+                confirm = ui.input(
+                    get_message("settings_trust_clear_confirm", language)
+                ).strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                ui.blank()
+                ui.print(get_message("operation_cancelled", language))
+                continue
+            if confirm in {"y", "yes", "是", "shi", "s"}:
+                if app.clear_trusted_fingerprints():
+                    ui.print(get_message("settings_trust_cleared", language))
+                else:
+                    ui.print(get_message("operation_cancelled", language))
+            else:
+                ui.print(get_message("operation_cancelled", language))
+        elif choice == "7":
             return language
         else:
             ui.print(get_message("invalid_choice", language))
@@ -1134,12 +1243,33 @@ def run_cli() -> int:
         config.device_name = device_name
         save_config(config)
 
+    if not config.device_id:
+        config.device_id = str(uuid.uuid4())
+        save_config(config)
+
+    identity_private = None
+    if config.identity_private_key:
+        try:
+            identity_private = deserialize_identity_private_key(config.identity_private_key)
+        except Exception:  # noqa: BLE001
+            identity_private = None
+    if identity_private is None:
+        identity_private = generate_identity_private_key()
+        config.identity_private_key = serialize_identity_private_key(identity_private)
+        save_config(config)
+    identity_public = identity_public_bytes(identity_private)
+
+    trust_store = TrustedPeerStore()
+
     app = GlitterApp(
+        device_id=config.device_id or str(uuid.uuid4()),
         device_name=device_name,
         language=language,
         transfer_port=config.transfer_port,
         debug=debug,
         encryption_enabled=config.encryption_enabled,
+        identity_public=identity_public,
+        trust_store=trust_store,
         ui=ui,
     )
     ui.print(get_message("welcome", language))
