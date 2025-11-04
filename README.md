@@ -1,6 +1,6 @@
 # Glitter — Simple LAN File Transfer CLI
 
-![Glitter](./assets/glitter.svg)
+![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
 
 Glitter is a cross‑platform, terminal‑based tool for sending files over a local network. It discovers peers automatically, confirms transfers on the receiver, and supports English/Chinese UIs.
 

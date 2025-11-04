@@ -1,6 +1,6 @@
 # Glitter — 简洁的局域网文件传输 CLI
 
-![Glitter](https://github.com/scarletkc/glitter/blob/main/assets/glitter.svg)
+![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
 
 Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动发现同网段设备，接收方需要确认后开始传输，并支持中英文界面切换。
 
