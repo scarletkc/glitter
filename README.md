@@ -88,6 +88,7 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
   - Example: `glitter send 192.168.1.20 ~/Downloads/demo.zip`  
   - IPv6: `glitter send "[fe80::abcd]:45846" ./folder`  
   - Reuses the same progress display and history logging as the interactive flow (the receiver needs the menu running to approve)
+- Want to keep it running headlessly? Wrap the same command with `uv run`, `systemd`, `pm2`, etc. once the initial setup is done.
 
 ## Files & Persistence
 
@@ -99,11 +100,6 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 ## Debugging
 
 - Enable verbose IDs in lists by setting env var `GLITTER_DEBUG=1` before launch.
-
-## Roadmap / Ideas
-
-- Drag‑and‑drop TUI, multi‑file queue
-- Service mode and auto‑accept rules
 
 ## License
 
