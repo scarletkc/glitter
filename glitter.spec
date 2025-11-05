@@ -3,15 +3,20 @@ from pathlib import Path
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules
-from PyInstaller.utils.win32.versioninfo import (
-    FixedFileInfo,
-    StringFileInfo,
-    StringStruct,
-    StringTable,
-    VarFileInfo,
-    VarStruct,
-    VSVersionInfo,
-)
+
+
+IS_WINDOWS = sys.platform.startswith("win")
+
+if IS_WINDOWS:
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
 
 try:
     ROOT_DIR = Path(__file__).resolve().parent
@@ -23,54 +28,62 @@ if str(ROOT_DIR) not in sys.path:
 from glitter import __version__ as GLITTER_VERSION
 
 
+MAIN_SCRIPT = str(ROOT_DIR / "glitter" / "__main__.py")
+
 def _version_tuple(raw: str):
     parts = [int(bit) for bit in raw.split(".") if bit.isdigit()]
     padded = (parts + [0, 0, 0, 0])[:4]
     return tuple(padded)
 
-
-VERSION_INFO = VSVersionInfo(
-    ffi=FixedFileInfo(
-        filevers=_version_tuple(GLITTER_VERSION),
-        prodvers=_version_tuple(GLITTER_VERSION),
-        mask=0x3F,
-        flags=0,
-        OS=0x40004,
-        fileType=0x1,
-        subtype=0x0,
-        date=(0, 0),
-    ),
-    kids=[
-        StringFileInfo(
-            [
-                StringTable(
-                    "040904B0",
-                    [
-                        StringStruct("CompanyName", "ScarletKc"),
-                        StringStruct("FileDescription", "Simple LAN File Transfer CLI"),
-                        StringStruct("FileVersion", GLITTER_VERSION),
-                        StringStruct("InternalName", "glitter"),
-                        StringStruct("LegalCopyright", "Copyright (C) ScarletKc"),
-                        StringStruct("OriginalFilename", "glitter.exe"),
-                        StringStruct("ProductName", "Glitter"),
-                        StringStruct("ProductVersion", GLITTER_VERSION),
-                    ],
-                )
-            ]
+if IS_WINDOWS:
+    VERSION_INFO = VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=_version_tuple(GLITTER_VERSION),
+            prodvers=_version_tuple(GLITTER_VERSION),
+            mask=0x3F,
+            flags=0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0),
         ),
-        VarFileInfo([VarStruct("Translation", [1033, 1200])]),
-    ],
-)
+        kids=[
+            StringFileInfo(
+                [
+                    StringTable(
+                        "040904B0",
+                        [
+                            StringStruct("CompanyName", "ScarletKc"),
+                            StringStruct("FileDescription", "Simple LAN File Transfer CLI"),
+                            StringStruct("FileVersion", GLITTER_VERSION),
+                            StringStruct("InternalName", "glitter"),
+                            StringStruct("LegalCopyright", "Copyright (C) ScarletKc"),
+                            StringStruct("OriginalFilename", "glitter.exe"),
+                            StringStruct("ProductName", "Glitter"),
+                            StringStruct("ProductVersion", GLITTER_VERSION),
+                        ],
+                    )
+                ]
+            ),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
+else:
+    VERSION_INFO = None
 
 hiddenimports = []
 hiddenimports += collect_submodules('cryptography')
 
-ICON_PATH = str(ROOT_DIR / "assets" / "glitter.ico")
+if IS_WINDOWS:
+    icon_filename = "glitter.ico"
+else:
+    icon_filename = "glitter.png"
+ICON_PATH = str(ROOT_DIR / "assets" / icon_filename)
 
 
 a = Analysis(
-    ['glitter\\__main__.py'],
-    pathex=[],
+    [MAIN_SCRIPT],
+    pathex=[str(ROOT_DIR)],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
