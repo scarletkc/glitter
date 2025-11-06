@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Optional, Set, Union
+from typing import Callable, Optional, Sequence, Set, Union
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -966,6 +966,18 @@ def parse_target_spec(raw: str, default_port: int) -> Optional[dict[str, object]
     }
 
 
+def match_peers_by_name(peers: Sequence[PeerInfo], query: str) -> list[PeerInfo]:
+    """Return peers whose device name matches the query (case-insensitive)."""
+
+    normalized = query.strip().casefold()
+    if not normalized:
+        return []
+    exact_matches = [peer for peer in peers if peer.name.casefold() == normalized]
+    if exact_matches:
+        return exact_matches
+    return [peer for peer in peers if normalized in peer.name.casefold()]
+
+
 def send_file_cli(
     ui: TerminalUI,
     app: GlitterApp,
@@ -977,12 +989,13 @@ def send_file_cli(
 ) -> None:
     peers = app.list_peers()
     default_port = app.transfer_port
+    peer_number_lookup = {peer.peer_id: index for index, peer in enumerate(peers, start=1)}
     if preselected_peer is None:
         if peers:
             list_peers_cli(ui, app, language)
         else:
             show_message(ui, "no_peers", language)
-            show_message(ui, "manual_target_hint", language)
+            show_message(ui, "manual_target_hint_no_peers", language)
         ui.blank()
     else:
         ui.blank()
@@ -1002,6 +1015,27 @@ def send_file_cli(
                 if 0 <= idx < len(peers):
                     selected_peer = peers[idx]
                     break
+            name_matches = match_peers_by_name(peers, choice)
+            if name_matches:
+                if len(name_matches) == 1:
+                    selected_peer = name_matches[0]
+                    break
+                option_strings = []
+                for candidate in name_matches:
+                    index_label = peer_number_lookup.get(candidate.peer_id)
+                    if index_label is not None:
+                        option_strings.append(f"[{index_label}] {candidate.name} ({candidate.ip})")
+                    else:
+                        option_strings.append(f"{candidate.name} ({candidate.ip})")
+                ui.print(
+                    render_message(
+                        "peer_name_ambiguous",
+                        language,
+                        name=choice,
+                        options=", ".join(option_strings),
+                    )
+                )
+                continue
             manual_target = parse_target_spec(choice, default_port)
             if manual_target:
                 normalized_ip = manual_target.get("normalized_ip")
@@ -1959,6 +1993,7 @@ def run_send_command(target: str, file_path_arg: str) -> int:
     exit_code = 0
     try:
         peers = app.list_peers()
+        peer_number_lookup = {peer.peer_id: index for index, peer in enumerate(peers, start=1)}
         target_info_prefetched: Optional[dict[str, object]] = None
         target_ip_candidate = parse_target_spec(target, app.transfer_port)
         if target_ip_candidate:
@@ -1976,6 +2011,29 @@ def run_send_command(target: str, file_path_arg: str) -> int:
                 selected_peer = peers[index]
         else:
             selected_peer = None
+
+        if not selected_peer and peers:
+            name_matches = match_peers_by_name(peers, target)
+            if name_matches:
+                if len(name_matches) == 1:
+                    selected_peer = name_matches[0]
+                else:
+                    option_strings = []
+                    for candidate in name_matches:
+                        index_label = peer_number_lookup.get(candidate.peer_id)
+                        if index_label is not None:
+                            option_strings.append(f"[{index_label}] {candidate.name} ({candidate.ip})")
+                        else:
+                            option_strings.append(f"{candidate.name} ({candidate.ip})")
+                    ui.print(
+                        render_message(
+                            "peer_name_ambiguous",
+                            language,
+                            name=target,
+                            options=", ".join(option_strings),
+                        )
+                    )
+                    return 1
 
         if not selected_peer:
             default_port = app.transfer_port
