@@ -1,6 +1,18 @@
-# Glitter — Simple File Transfer CLI
+<div align="center">
 
 ![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
+
+# Glitter — Simple File Transfer CLI
+
+[![PyPI](https://img.shields.io/pypi/v/glitter-cli.svg)](https://pypi.org/project/glitter-cli/)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+[![License](https://img.shields.io/github/license/scarletkc/glitter.svg)](LICENSE)
+
+**[English](https://github.com/scarletkc/glitter/blob/main/README.md)** | [中文](https://github.com/scarletkc/glitter/blob/main/docs/README.zh-CN.md)
+
+</div>
+
+---
 
 Glitter is a cross‑platform, terminal‑based tool for sending files over a local network. It discovers peers automatically, confirms transfers on the receiver, and supports English/Chinese UIs.
 
@@ -14,10 +26,6 @@ Glitter is a cross‑platform, terminal‑based tool for sending files over a lo
 - Transfer progress and live throughput (e.g. 1.2 MB/s)
 - Transfer history (JSONL) stored under user home
 - Settings for language & device name & encryption, clear history
-  
-[Python 3.9+](https://www.python.org/downloads/)
-
-Chinese docs: see [README.zh-CN.md](https://github.com/scarletkc/glitter/blob/main/docs/README.zh-CN.md).
 
 ## Why Glitter?
 
@@ -47,7 +55,7 @@ On first run, Glitter asks for language and device name and saves them. Next run
 
 ### PyPI
 
-[Released](https://pypi.org/project/glitter-cli/), recommended to install and run via [pipx](https://pipx.pypa.io/stable/):
+recommended to install and run via [pipx](https://pipx.pypa.io/stable/):
 
 - `apt install pipx`  # Debian/Ubuntu
 - `pipx install glitter-cli`

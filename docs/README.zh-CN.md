@@ -1,6 +1,18 @@
-# Glitter — 简洁的文件传输 CLI
+<div align="center">
 
 ![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
+
+# Glitter — 简洁的文件传输 CLI
+
+[![PyPI](https://img.shields.io/pypi/v/glitter-cli.svg)](https://pypi.org/project/glitter-cli/)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+[![License](https://img.shields.io/github/license/scarletkc/glitter.svg)](LICENSE)
+
+[English](https://github.com/scarletkc/glitter/blob/main/README.md) | **[中文](https://github.com/scarletkc/glitter/blob/main/docs/README.zh-CN.md)**
+
+</div>
+
+---
 
 Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动发现同网段设备，接收方需要确认后开始传输，并支持中英文界面切换。
 
@@ -14,10 +26,6 @@ Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动
 - 实时传输进度与速率
 - 历史记录保存到用户目录（JSONL）
 - 设置语言与设备名，支持清空历史和加密
-
-[Python 3.9+](https://www.python.org/downloads/)
-
-英文版文档请见仓库根目录 [README.md](https://github.com/scarletkc/glitter/blob/main/README.md)。
 
 ## 为什么选择 Glitter？
 
@@ -47,7 +55,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ### PyPI
 
-[发布](https://pypi.org/project/glitter-cli/)，推荐使用 [pipx](https://pipx.pypa.io/stable/) 安装与运行：
+推荐使用 [pipx](https://pipx.pypa.io/stable/) 安装与运行：
 
 - `apt install pipx`  # Debian/Ubuntu
 - `pipx install glitter-cli`
