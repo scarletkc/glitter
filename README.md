@@ -1,4 +1,4 @@
-# Glitter — Simple LAN File Transfer CLI
+# Glitter — Simple File Transfer CLI
 
 ![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "glitter-cli"
-description = "Simple LAN File Transfer CLI"
+description = "Simple File Transfer CLI"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

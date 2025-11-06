@@ -54,7 +54,7 @@ if IS_WINDOWS:
                         "040904B0",
                         [
                             StringStruct("CompanyName", "ScarletKc"),
-                            StringStruct("FileDescription", "Simple LAN File Transfer CLI"),
+                            StringStruct("FileDescription", "Simple File Transfer CLI"),
                             StringStruct("FileVersion", GLITTER_VERSION),
                             StringStruct("InternalName", "glitter"),
                             StringStruct("LegalCopyright", "Copyright (C) ScarletKc"),

@@ -1,4 +1,4 @@
-# Glitter — 简洁的局域网文件传输 CLI
+# Glitter — 简洁的文件传输 CLI
 
 ![Glitter](https://raw.githubusercontent.com/scarletkc/glitter/refs/heads/main/assets/glitter.svg)
 
