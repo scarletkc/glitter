@@ -1935,6 +1935,9 @@ def run_peers_command() -> int:
 
     exit_code = 0
     try:
+        wait_seconds = 5.0
+        show_message(ui, "peers_waiting", language, seconds=wait_seconds)
+        time.sleep(wait_seconds)
         list_peers_cli(ui, app, language)
     finally:
         try:
@@ -1945,6 +1948,37 @@ def run_peers_command() -> int:
             except KeyboardInterrupt:
                 pass
     return exit_code
+
+
+def run_history_command() -> int:
+    debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    app, config, ui, language = initialize_application(debug)
+    try:
+        app.start()
+    except OSError as exc:
+        failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
+        ui.print(
+            render_message(
+                "settings_port_failed",
+                language,
+                port=failure_port,
+                error=exc,
+            )
+        )
+        app.stop()
+        return 1
+
+    try:
+        show_history(ui, language)
+    finally:
+        try:
+            app.cancel_pending_requests()
+        finally:
+            try:
+                app.stop()
+            except KeyboardInterrupt:
+                pass
+    return 0
 
 
 def build_parser(language: str) -> argparse.ArgumentParser:
@@ -2018,6 +2052,22 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         action="help",
         help=get_message("cli_help_help", language),
     )
+
+    history_parser = subparsers.add_parser(
+        "history",
+        help=get_message("cli_history_help", language),
+        description=get_message("cli_history_help", language),
+        add_help=False,
+        messages=language_messages,
+    )
+    history_parser.prog = f"{parser.prog} history"
+    history_parser._optionals.title = get_message("cli_optionals_title", language)
+    history_parser.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help=get_message("cli_help_help", language),
+    )
     return parser
 
 
@@ -2033,6 +2083,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return run_send_command(args.target, args.path)
     if getattr(args, "command", None) == "peers":
         return run_peers_command()
+    if getattr(args, "command", None) == "history":
+        return run_history_command()
     return run_cli()
 
 

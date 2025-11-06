@@ -65,7 +65,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ### GitHub
 
-- Windows二进制文件： [exe](https://github.com/scarletkc/glitter/releases)
+- 二进制文件： [直接下载使用](https://github.com/scarletkc/glitter/releases)
 
 要求：安装[依赖](https://github.com/scarletkc/glitter/blob/main/requirements.txt)
 
@@ -76,18 +76,12 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ## 用法
 
-- `glitter` — 交互式菜单
-  - [1] 查看在线客户端：显示名称/IP/版本
-  - [2] 发送文件：输入客户端编号或 IP 地址（支持 IPv4/IPv6，可选端口），再输入路径（支持带引号）
-  - [3] 待处理请求：接收端确认/拒绝，并可选择保存目录
-  - [4] 查看更新：显示当前版本与最新版本（需联网），并提供项目地址
-  - [5] 传输记录：查看最近记录
-  - [6] 设置：修改语言/设备名/端口/加密、默认接收目录、空闲时自动接收可信设备，清空历史或信任指纹
-  - [7] 退出
-- `glitter send <IP[:端口]> <路径>` — 快速发送，无需进入菜单
-  - 示例：`glitter send 192.168.1.20 ~/Downloads/demo.zip` IPv6：`glitter send "[fe80::abcd]:45846" ./folder`
-  - 与交互式流程共享同样的进度展示与历史记录（接收方需运行菜单确认）
-- 需要常驻后台？完成初始化后，可交给 `uv run`、systemd、pm2 等进程管理器.
+- `glitter` — 启动交互式菜单（查看在线客户端、发送/接收请求、查看历史、调整设置等）。
+- `glitter send <IP[:端口]> <路径>` — 快速发送文件或目录，无需进入菜单。  
+- `glitter peers` — 列出当前发现的局域网客户端。
+- `glitter history` — 打印最近的传输记录。
+
+提示：完成初始化后，可将 Glitter 交给 `uv run`、systemd、pm2 等进程管理器，让其在后台持续运行。
 
 ## 文件与持久化
 

@@ -65,7 +65,7 @@ On first run, Glitter asks for language and device name and saves them. Next run
 
 ### GitHub
 
-- For Windows: [exe](https://github.com/scarletkc/glitter/releases)
+- Compilation: [binary](https://github.com/scarletkc/glitter/releases)
 
 Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requirements.txt)
 
@@ -76,18 +76,12 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 
 ## Usage
 
-- `glitter` — interactive menu  
-  - [1] List peers: Show online devices (name/IP/version)  
-  - [2] Send file: Select a peer or enter an IP (IPv4/IPv6[:port]) and input a path  
-  - [3] Incoming requests: Review transfer requests; Accept/Decline and choose a save directory  
-  - [4] Check updates: Open-source repo link and latest version info  
-  - [5] History: Show the latest transfer records  
-  - [6] Settings: Change language/device name/port/encryption, choose default receive directory, toggle auto-accept trusted transfers, clear history or trusted fingerprints  
-  - [7] Quit: Exit the program
-- `glitter send <IP[:port]> <path>` — direct send without entering the menu  
-  - Example: `glitter send 192.168.1.20 ~/Downloads/demo.zip` IPv6: `glitter send "[fe80::abcd]:45846" ./folder`  
-  - Reuses the same progress display and history logging as the interactive flow (the receiver needs the menu running to approve)
-- Want to keep it running headlessly? Wrap the same command with `uv run`, `systemd`, `pm2`, etc. once the initial setup is done.
+- `glitter` — Launch the interactive menu (list peers, send/receive requests, check history, tweak settings, etc.).
+- `glitter send <IP[:port]> <path>` — Send a file or directory directly without the menu.  
+- `glitter peers` — List peers currently discovered on the LAN.
+- `glitter history` — Print recent transfer history records.
+
+Tip: once the initial setup is complete, you can keep Glitter running headlessly with your favourite process manager (`uv run`, `systemd`, `pm2`, ...).
 
 ## Files & Persistence
 
