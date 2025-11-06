@@ -182,11 +182,11 @@ class ProgressTracker:
         if self._last_time is None or transferred < self._last_bytes:
             rate = transferred / elapsed if elapsed > 0 else 0.0
         else:
-            time_delta = now - self._last_time
+            time_delta = max(now - self._last_time, 0.1)
             byte_delta = transferred - self._last_bytes
             rate = byte_delta / time_delta if time_delta > 0 else 0.0
         if force:
-            rate = transferred / elapsed if elapsed > 0 else 0.0
+            rate = transferred / max(elapsed, 0.1)
         message = render_message(
             "progress_line",
             self._language,
@@ -1016,12 +1016,14 @@ def send_file_cli(
     show_message(ui, "cancel_hint", language)
     progress_tracker = ProgressTracker(ui, language)
     handshake_announced = False
+    progress_started = False
 
     def report_progress(sent: int, total: int) -> None:
-        nonlocal handshake_announced
+        nonlocal handshake_announced, progress_started
         if not handshake_announced:
             show_message(ui, "recipient_accepted", language)
             handshake_announced = True
+        progress_started = True
         display_total = total if total > 0 else sent
         progress_tracker.update(sent, display_total, force=(total > 0 and sent >= total))
 
@@ -1063,9 +1065,11 @@ def send_file_cli(
     file_hash = result_holder.get("hash") if isinstance(result_holder.get("hash"), str) else None
     final_bytes = progress_tracker.last_bytes
     final_total = progress_tracker.last_total or final_bytes or file_size
-    progress_tracker.update(final_bytes, final_total, force=True)
-    final_size = final_total
-    progress_tracker.finish()
+    if progress_started:
+        progress_tracker.update(final_bytes, final_total, force=True)
+    final_size = final_total if progress_started else file_size
+    if progress_started:
+        progress_tracker.finish()
 
     responder_id_obj = result_holder.get("responder_id")
     if manual_selection and manual_info and isinstance(manual_info.get("normalized_ip"), str) and isinstance(responder_id_obj, str):
