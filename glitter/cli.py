@@ -283,6 +283,7 @@ class GlitterApp:
         self._manual_peer_lock = threading.Lock()
         self._auto_accept_mode = "off"
         self.set_auto_accept_mode(auto_accept_trusted)
+        self._auto_reject_untrusted = False
 
         if isinstance(transfer_port, int) and 1 <= transfer_port <= 65535:
             preferred_port = transfer_port
@@ -339,6 +340,9 @@ class GlitterApp:
 
     def set_auto_accept_trusted(self, enabled: bool) -> None:
         self.set_auto_accept_mode("trusted" if enabled else "off")
+
+    def set_auto_reject_untrusted(self, enabled: bool) -> None:
+        self._auto_reject_untrusted = bool(enabled)
 
     def _create_transfer_service(self, bind_port: int, allow_fallback: bool) -> TransferService:
         return TransferService(
@@ -625,8 +629,25 @@ class GlitterApp:
                             notice_key,
                         )
                         return
-        show_message(self.ui, "waiting_for_decision", self.language)
-        self.ui.flush()
+        if (
+            mode == "trusted"
+            and ticket.identity_status != "trusted"
+            and self._auto_reject_untrusted
+        ):
+            self.ui.print(
+                render_message(
+                    "auto_accept_trusted_rejected",
+                    self.language,
+                    name=ticket.sender_name,
+                    ip=ticket.sender_ip,
+                    filename=display_name,
+                )
+            )
+            self.ui.flush()
+            self.decline_request(ticket.request_id)
+        else:
+            show_message(self.ui, "waiting_for_decision", self.language)
+            self.ui.flush()
 
     def _run_auto_accept_postprocess(
         self,
@@ -2186,6 +2207,7 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
             return 1
 
     app.set_auto_accept_mode(effective_mode)
+    app.set_auto_reject_untrusted(effective_mode == "trusted")
     mode_label = get_message(f"settings_auto_accept_state_{effective_mode}", language)
 
     if effective_mode == "all":
@@ -2207,28 +2229,9 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
         return 1
 
     ui.print(render_message("receive_waiting", language, mode=mode_label))
-    manual_announced: Set[str] = set()
 
     try:
         while True:
-            tickets = app.pending_requests()
-            if effective_mode == "trusted":
-                for ticket in tickets:
-                    if ticket.identity_status == "trusted":
-                        continue
-                    if ticket.request_id in manual_announced:
-                        continue
-                    display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
-                    ui.print(
-                        render_message(
-                            "receive_manual_notice",
-                            language,
-                            filename=display_name,
-                            name=ticket.sender_name,
-                            ip=ticket.sender_ip,
-                        )
-                    )
-                    manual_announced.add(ticket.request_id)
             time.sleep(0.5)
     except KeyboardInterrupt:
         ui.blank()
