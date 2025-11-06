@@ -82,7 +82,7 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 - `glitter history` — Print recent transfer history records.
 - `glitter settings` — Jump straight into the interactive settings menu.
 - `glitter update` — Check the latest available Glitter version.
-- `glitter receive [--mode trusted|all] [--dir PATH] [--port PORT]` — Run in auto-receive mode (trusted/all) without opening the menu.
+- `glitter receive [--mode trusted|all] [--dir PATH] [--port PORT] [--no-encryption]` — Run in auto-receive mode (trusted/all) without opening the menu.
 
 Tip: once the initial setup is complete, you can keep Glitter running headlessly with your favourite process manager (`uv run`, `systemd`, `pm2`, ...). 
 

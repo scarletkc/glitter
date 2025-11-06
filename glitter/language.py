@@ -64,6 +64,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_mode_help": "Override auto-accept mode for this session (trusted|all)",
         "cli_receive_dir_help": "Temporary download directory for this session",
         "cli_receive_port_help": "Temporary transfer port for this session",
+        "cli_receive_no_encryption_help": "Temporarily disable encryption for this receive session",
         "cli_path_warning": "Tip: The `glitter` command is not on PATH.",
         "menu_header": "Available actions:",
         "menu_options": "[1] List peers  [2] Send file  [3] Incoming requests  [4] Check updates  [5] History  [6] Settings  [7] Quit",
@@ -163,6 +164,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "receive_dir_set": "Temporary download directory: {path}",
         "receive_dir_error": "Failed to prepare directory: {error}",
         "receive_waiting": "Listening for incoming transfers ({mode}). Press Ctrl+C to stop.",
+        "receive_encryption_disabled": "Warning: encryption disabled for this receive session only.",
         "receive_shutdown": "Stopping receive service...",
     },
     "zh": {
@@ -216,6 +218,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_mode_help": "本次会话覆盖自动接收模式（trusted/all）",
         "cli_receive_dir_help": "本次会话使用的临时保存目录",
         "cli_receive_port_help": "本次会话使用的临时传输端口",
+        "cli_receive_no_encryption_help": "仅针对本次会话临时关闭加密",
         "cli_path_warning": "提示：系统环境变量 PATH 中未找到 `glitter` 命令！",
         "menu_header": "可用操作：",
         "menu_options": "[1] 查看在线客户端  [2] 发送文件  [3] 待处理请求  [4] 查看更新  [5] 传输记录  [6] 设置  [7] 退出",
@@ -315,6 +318,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "receive_dir_set": "临时保存目录：{path}",
         "receive_dir_error": "无法准备保存目录：{error}",
         "receive_waiting": "正在监听传入文件（模式：{mode}），按 Ctrl+C 结束。",
+        "receive_encryption_disabled": "警告：本次接收会话已关闭加密（仅临时生效）。",
         "receive_shutdown": "正在停止接收服务……",
     },
 }

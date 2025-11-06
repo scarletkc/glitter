@@ -2148,7 +2148,7 @@ def run_settings_command() -> int:
     return 0
 
 
-def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_arg: Optional[str]) -> int:
+def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_arg: Optional[str], *, no_encryption: bool = False) -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     app, config, ui, language = initialize_application(debug)
 
@@ -2210,6 +2210,11 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
     app.set_auto_reject_untrusted(effective_mode == "trusted")
     mode_label = get_message(f"settings_auto_accept_state_{effective_mode}", language)
 
+    previous_encryption_state = app.encryption_enabled
+    if no_encryption:
+        app.set_encryption_enabled(False)
+        ui.print(render_message("receive_encryption_disabled", language))
+
     if effective_mode == "all":
         ui.print(render_message("settings_auto_accept_all_warning", language))
 
@@ -2237,6 +2242,8 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
         ui.blank()
         show_message(ui, "receive_shutdown", language)
     finally:
+        if no_encryption:
+            app.set_encryption_enabled(previous_encryption_state)
         try:
             app.cancel_pending_requests()
         finally:
@@ -2394,6 +2401,11 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         "--port",
         help=get_message("cli_receive_port_help", language),
     )
+    receive_parser.add_argument(
+        "--no-encryption",
+        action="store_true",
+        help=get_message("cli_receive_no_encryption_help", language),
+    )
     return parser
 
 
@@ -2416,7 +2428,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     if getattr(args, "command", None) == "update":
         return run_update_command()
     if getattr(args, "command", None) == "receive":
-        return run_receive_command(getattr(args, "mode", None), getattr(args, "dir", None), getattr(args, "port", None))
+        return run_receive_command(
+            getattr(args, "mode", None),
+            getattr(args, "dir", None),
+            getattr(args, "port", None),
+            no_encryption=getattr(args, "no_encryption", False),
+        )
     return run_cli()
 
 
