@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -223,7 +223,7 @@ class GlitterApp:
         encryption_enabled: bool = True,
         identity_public: Optional[bytes] = None,
         trust_store: Optional[TrustedPeerStore] = None,
-        auto_accept_trusted: bool = False,
+        auto_accept_trusted: Union[bool, str] = False,
         ui: Optional[TerminalUI] = None,
     ) -> None:
         self.device_id = device_id
@@ -231,13 +231,14 @@ class GlitterApp:
         self.language = language
         self.default_download_dir = self._prepare_download_dir(default_download_dir)
         self.debug = debug
-        self.auto_accept_trusted = auto_accept_trusted
         self._encryption_enabled = encryption_enabled
         self.ui = ui or TerminalUI()
         self._identity_public = identity_public or b""
         self._trust_store = trust_store
         self._manual_peer_ids: dict[str, str] = {}
         self._manual_peer_lock = threading.Lock()
+        self._auto_accept_mode = "off"
+        self.set_auto_accept_mode(auto_accept_trusted)
 
         if isinstance(transfer_port, int) and 1 <= transfer_port <= 65535:
             preferred_port = transfer_port
@@ -273,8 +274,27 @@ class GlitterApp:
         self.default_download_dir = ensure_download_dir()
         return self.default_download_dir
 
+    @property
+    def auto_accept_mode(self) -> str:
+        return self._auto_accept_mode
+
+    @property
+    def auto_accept_trusted(self) -> bool:
+        return self._auto_accept_mode in {"trusted", "all"}
+
+    def set_auto_accept_mode(self, mode: Union[bool, str]) -> None:
+        if isinstance(mode, bool):
+            normalized = "trusted" if mode else "off"
+        elif isinstance(mode, str):
+            normalized = mode.strip().lower()
+        else:
+            normalized = "off"
+        if normalized not in {"off", "trusted", "all"}:
+            normalized = "off"
+        self._auto_accept_mode = normalized
+
     def set_auto_accept_trusted(self, enabled: bool) -> None:
-        self.auto_accept_trusted = bool(enabled)
+        self.set_auto_accept_mode("trusted" if enabled else "off")
 
     def _create_transfer_service(self, bind_port: int, allow_fallback: bool) -> TransferService:
         return TransferService(
@@ -522,7 +542,9 @@ class GlitterApp:
             )
             self.ui.flush()
 
-        if self.auto_accept_trusted and ticket.identity_status == "trusted":
+        mode = self.auto_accept_mode
+        allow_auto = mode == "all" or (mode == "trusted" and ticket.identity_status == "trusted")
+        if allow_auto:
             if self._transfer_service.has_active_receiving():
                 self.ui.print(
                     render_message(
@@ -547,7 +569,17 @@ class GlitterApp:
                     self.ui.flush()
                 else:
                     if accepted_ticket:
-                        self._run_auto_accept_postprocess(accepted_ticket, ticket, destination)
+                        notice_key = (
+                            "auto_accept_trusted_notice"
+                            if ticket.identity_status == "trusted"
+                            else "auto_accept_all_notice"
+                        )
+                        self._run_auto_accept_postprocess(
+                            accepted_ticket,
+                            ticket,
+                            destination,
+                            notice_key,
+                        )
                         return
         show_message(self.ui, "waiting_for_decision", self.language)
         self.ui.flush()
@@ -557,11 +589,12 @@ class GlitterApp:
         accepted_ticket: TransferTicket,
         ticket: TransferTicket,
         destination: Path,
+        notice_key: str,
     ) -> None:
         display_name = ticket.filename + ("/" if ticket.content_type == "directory" else "")
         self.ui.print(
             render_message(
-                "auto_accept_trusted_notice",
+                notice_key,
                 self.language,
                 filename=display_name,
                 name=ticket.sender_name,
@@ -1419,7 +1452,7 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             language,
         )
         auto_accept_label = get_message(
-            "settings_auto_accept_on" if app.auto_accept_trusted else "settings_auto_accept_off",
+            f"settings_auto_accept_state_{app.auto_accept_mode}",
             language,
         )
         ui.print(
@@ -1629,7 +1662,7 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             )
         elif choice == "7":
             current_state = get_message(
-                "settings_auto_accept_on" if app.auto_accept_trusted else "settings_auto_accept_off",
+                f"settings_auto_accept_state_{app.auto_accept_mode}",
                 language,
             )
             try:
@@ -1647,29 +1680,57 @@ def settings_menu(ui: TerminalUI, app: GlitterApp, config: AppConfig, language: 
             if not answer:
                 show_message(ui, "operation_cancelled", language)
                 continue
-            if answer in {"y", "yes", "true", "on", "1", "是", "shi"}:
-                desired = True
-            elif answer in {"n", "no", "false", "off", "0", "否", "fou"}:
-                desired = False
-            else:
+            normalized = answer.replace(" ", "")
+            mapping = {
+                "0": "off",
+                "off": "off",
+                "n": "off",
+                "none": "off",
+                "disable": "off",
+                "否": "off",
+                "fou": "off",
+                "关闭": "off",
+                "no": "off",
+                "2": "all",
+                "all": "all",
+                "a": "all",
+                "any": "all",
+                "全部": "all",
+                "全": "all",
+                "1": "trusted",
+                "trusted": "trusted",
+                "t": "trusted",
+                "y": "trusted",
+                "yes": "trusted",
+                "true": "trusted",
+                "on": "trusted",
+                "仅信任": "trusted",
+                "trustedonly": "trusted",
+                "是": "trusted",
+                "shi": "trusted",
+            }
+            desired_mode = mapping.get(normalized)
+            if desired_mode is None:
                 show_message(ui, "invalid_choice", language)
                 continue
-            if desired == app.auto_accept_trusted:
+            if desired_mode == app.auto_accept_mode:
                 show_message(ui, "operation_cancelled", language)
                 continue
-            app.set_auto_accept_trusted(desired)
-            config.auto_accept_trusted = desired
+            app.set_auto_accept_mode(desired_mode)
+            config.auto_accept_trusted = desired_mode
             save_config(config)
             ui.print(
                 render_message(
                     "settings_auto_accept_updated",
                     language,
                     state=get_message(
-                        "settings_auto_accept_on" if desired else "settings_auto_accept_off",
+                        f"settings_auto_accept_state_{desired_mode}",
                         language,
                     ),
                 )
             )
+            if desired_mode == "all":
+                ui.print(render_message("settings_auto_accept_all_warning", language))
         elif choice == "8":
             try:
                 confirm = ui.input(

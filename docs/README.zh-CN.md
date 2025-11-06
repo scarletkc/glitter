@@ -76,16 +76,16 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ## 用法
 
-- `glitter` — 启动交互式菜单（查看在线客户端、发送/接收请求、查看历史、调整设置等）。
+- `glitter` — 启动交互式菜单（查看在线客户端、发送/接收请求、查看历史、配置下载目录/加密/自动接收模式等）。
 - `glitter send <IP[:端口]> <路径>` — 快速发送文件或目录，无需进入菜单。  
 - `glitter peers` — 列出当前发现的局域网客户端。
 - `glitter history` — 打印最近的传输记录。
 
-提示：完成初始化后，可将 Glitter 交给 `uv run`、systemd、pm2 等进程管理器，让其在后台持续运行。
+提示：完成初始化后，可将 Glitter 交给 `uv run`、systemd、pm2 等进程管理器，让其在后台持续运行。设置菜单支持三档自动接收模式：`关闭`、`仅限已信任`、`全部`。
 
 ## 文件与持久化
 
-- 配置：`~/.glitter/config.json`（语言、设备名、传输端口、加密、默认接收目录、空闲自动接收开关）
+- 配置：`~/.glitter/config.json`（语言、设备名、传输端口、加密、默认接收目录、自动接收模式）
 - 已信任指纹：`~/.glitter/known_peers.json`（首次确认后的设备指纹）
 - 历史：`~/.glitter/history.jsonl`（每行一条 JSON）
 - 默认接收目录：可在设置中自定义，默认值为 Windows `~/Downloads/GlitterDownloads`，其他系统 `~/GlitterDownloads`

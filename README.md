@@ -76,16 +76,16 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 
 ## Usage
 
-- `glitter` — Launch the interactive menu (list peers, send/receive requests, check history, tweak settings, etc.).
+- `glitter` — Launch the interactive menu (list peers, send/receive requests, view history, configure download/encryption/auto-accept modes, etc.).
 - `glitter send <IP[:port]> <path>` — Send a file or directory directly without the menu.  
 - `glitter peers` — List peers currently discovered on the LAN.
 - `glitter history` — Print recent transfer history records.
 
-Tip: once the initial setup is complete, you can keep Glitter running headlessly with your favourite process manager (`uv run`, `systemd`, `pm2`, ...).
+Tip: once the initial setup is complete, you can keep Glitter running headlessly with your favourite process manager (`uv run`, `systemd`, `pm2`, ...). Pick an auto-accept mode in the settings menu: `Off`, `Trusted only`, or `All`.
 
 ## Files & Persistence
 
-- Config: `~/.glitter/config.json` (language, device name, transfer port, encryption, default receive directory, auto-accept trusted flag)
+- Config: `~/.glitter/config.json` (language, device name, transfer port, encryption, default receive directory, auto-accept mode)
 - Trusted fingerprints: `~/.glitter/known_peers.json` (peer IDs and fingerprints stored after first approval)
 - History: `~/.glitter/history.jsonl` (one JSON per line)
 - Default receive folder: configurable; defaults to `~/Downloads/GlitterDownloads` on Windows, `~/GlitterDownloads` elsewhere
