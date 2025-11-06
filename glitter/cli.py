@@ -2357,7 +2357,7 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
         return 1
 
     ui.print(render_message("receive_dir_set", language, path=str(app.default_download_dir)))
-    
+
     local_ips = ", ".join(local_network_addresses())
     ui.print(
         render_message(
