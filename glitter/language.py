@@ -63,6 +63,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_mode_help": "Override auto-accept mode for this session (trusted|all)",
         "cli_receive_dir_help": "Temporary download directory for this session",
         "cli_receive_port_help": "Temporary transfer port for this session",
+        "cli_path_warning": "Tip: The `glitter` command is not on PATH.",
         "menu_header": "Available actions:",
         "menu_options": "[1] List peers  [2] Send file  [3] Incoming requests  [4] Check updates  [5] History  [6] Settings  [7] Quit",
         "menu_pending": " ({count} pending)",
@@ -213,6 +214,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_mode_help": "本次会话覆盖自动接收模式（trusted/all）",
         "cli_receive_dir_help": "本次会话使用的临时保存目录",
         "cli_receive_port_help": "本次会话使用的临时传输端口",
+        "cli_path_warning": "提示：系统环境变量 PATH 中未找到 `glitter` 命令！",
         "menu_header": "可用操作：",
         "menu_options": "[1] 查看在线客户端  [2] 发送文件  [3] 待处理请求  [4] 查看更新  [5] 传输记录  [6] 设置  [7] 退出",
         "menu_pending": "（{count} 个待处理）",
@@ -341,6 +343,7 @@ TONE_STYLES: Dict[str, str] = {
 
 MESSAGE_TONES: Dict[str, str] = {
     "welcome": "",
+    "cli_path_warning": "warning",
     "icon": "icon",
     "select_language": "",
     "menu_header": "",

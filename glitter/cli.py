@@ -8,6 +8,7 @@ import argparse
 import ipaddress
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -1856,6 +1857,8 @@ def run_cli() -> int:
     show_message(ui, "icon", language)
     show_message(ui, "welcome", language)
     show_message(ui, "current_version", language, version=__version__)
+    if shutil.which("glitter") is None:
+        show_message(ui, "cli_path_warning", language)
     try:
         app.start()
     except OSError as exc:
