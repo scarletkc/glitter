@@ -33,6 +33,7 @@
 - Commits: short, imperative subject; optional body with rationale/context. Example: `Add device name support in send command`.
 - Link issues in PRs (`Fixes #123`). Describe behavior changes and include CLI examples (before/after output).
 - Update `README.md`/`docs/` for user‑visible flags or flows. If adding/removing messages, update both locales in `glitter/language.py`.
+- If a change affects contributor workflows (e.g., commands, build/test process, CI, dependencies, directory structure, coding conventions, or security policies), update the relevant sections of this document and briefly call out the updates in the PR description.
 
 ## Security & Configuration Tips
 - Only persist under `~/.glitter/` (config, trust store, history). Do not log secrets or full key material.
