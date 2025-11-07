@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import re
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -31,11 +32,37 @@ from glitter import __version__ as GLITTER_VERSION
 MAIN_SCRIPT = str(ROOT_DIR / "glitter" / "__main__.py")
 
 def _version_tuple(raw: str):
-    parts = [int(bit) for bit in raw.split(".") if bit.isdigit()]
-    padded = (parts + [0, 0, 0, 0])[:4]
-    return tuple(padded)
+    raw = raw.strip()
+    release_parts = []
+    suffix_number = 0
+
+    for piece in raw.split("."):
+        match = re.match(r"^(\d+)", piece)
+        if not match:
+            break
+        release_parts.append(int(match.group(1)))
+        remainder = piece[match.end():]
+        if remainder:
+            suffix_match = re.match(r"[A-Za-z]+(\d+)", remainder)
+            if suffix_match:
+                suffix_number = int(suffix_match.group(1))
+            break
+        if len(release_parts) >= 4:
+            break
+
+    while len(release_parts) < 4:
+        release_parts.append(0)
+
+    if suffix_number:
+        release_parts[3] = suffix_number
+
+    return tuple(release_parts[:4])
+
+def _string_version(raw: str):
+    return ".".join(str(piece) for piece in _version_tuple(raw))
 
 if IS_WINDOWS:
+    FILE_VERSION = _string_version(GLITTER_VERSION)
     VERSION_INFO = VSVersionInfo(
         ffi=FixedFileInfo(
             filevers=_version_tuple(GLITTER_VERSION),
@@ -55,7 +82,7 @@ if IS_WINDOWS:
                         [
                             StringStruct("CompanyName", "ScarletKc"),
                             StringStruct("FileDescription", "Simple File Transfer CLI"),
-                            StringStruct("FileVersion", GLITTER_VERSION),
+                            StringStruct("FileVersion", FILE_VERSION),
                             StringStruct("InternalName", "glitter"),
                             StringStruct("LegalCopyright", "Copyright (C) ScarletKc"),
                             StringStruct("OriginalFilename", "glitter.exe"),
