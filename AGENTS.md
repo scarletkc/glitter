@@ -24,9 +24,10 @@
 - UI/logging via `rich` (see `TerminalUI`); localize user‑visible text with `get_message`/`render_message` and keep keys present in both English/Chinese in `language.py`.
 
 ## Testing Guidelines
-- No test suite is present. When adding features/bugfixes, include `pytest` tests under `tests/` named `test_*.py`.
-- Run locally: `pytest -q` (optionally `pytest --cov=glitter`). Prefer fakes/mocks for sockets; avoid live network in tests.
-- Aim for meaningful coverage on changed code; keep tests deterministic and OS‑portable (Linux/macOS/Windows).
+- Baseline coverage lives under `tests/` (e.g., transfer loopback, security crypto, CLI help). Follow the same `test_*.py` naming when adding new cases.
+- Recommended workflow: activate the project virtualenv (e.g., `python -m venv .venv && source .venv/bin/activate`) and run `python -m pytest -q` (`--cov=glitter` optional). Keep tests isolated and deterministic.
+- For socket-heavy code (e.g., `TransferService`), prefer loopback connections or mocks; avoid hitting real LAN peers. Ensure tests tolerate environments without raw socket perms by skipping or faking responsibly.
+- Provide targeted fixtures/mocks instead of sprawling integration harnesses so suites stay <1s/test on Linux/macOS/Windows runners.
 
 ## Commit & Pull Request Guidelines
 - Commits: short, imperative subject; optional body with rationale/context. Example: `Add device name support in send command`.
@@ -37,4 +38,3 @@
 - Only persist under `~/.glitter/` (config, trust store, history). Do not log secrets or full key material.
 - Default ports: UDP 45845 (discovery), TCP 45846 (transfer). Document any changes and consider firewall notes.
 - Use `GLITTER_DEBUG=1` for local troubleshooting; never gate core logic on debug mode.
-
