@@ -49,17 +49,17 @@ Glitter provides a **simple, terminal-based** alternative to GUI tools and compl
 
 ## Quick Start
 
-- Run Glitter instantly with uv 
-  
-```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  uv run glitter-cli
-```
-
 On first run, Glitter asks for language and device name and saves them. Next runs go straight to the main menu.
 
 - Compilation: [binary](https://github.com/scarletkc/glitter/releases)
 - Firewall: Allow UDP 45845 and TCP 45846 (transfer port) for the app if discovery/transfer is blocked.
+
+
+### Run Glitter instantly with uv
+```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  uv run glitter
+```
 
 ### Installation
 

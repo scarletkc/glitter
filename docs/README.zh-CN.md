@@ -49,17 +49,16 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 ## 快速开始
 
-- 通过 uv 一键运行
-
-```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  uv run glitter-cli
-```
-
 首次启动会提示选择语言与设备名称并保存。之后启动将直接进入主菜单。
 
 - 二进制文件： [直接下载使用](https://github.com/scarletkc/glitter/releases)
 - 防火墙：若发现/传输异常，请放行 UDP 45845 以及 TCP 45846（传输端口）。
+  
+### 通过 uv 一键运行
+```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  uv run glitter
+```
 
 ### 安装
 
