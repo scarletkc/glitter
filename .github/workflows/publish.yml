@@ -82,7 +82,16 @@ jobs:
         if: steps.detect.outputs.changed == 'true'
         shell: bash
         run: |
-          python -m pytest -q --cov=glitter
+          python -m pytest -q --cov=glitter --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        if: steps.detect.outputs.changed == 'true'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: true
+          verbose: true
 
   prepare_release:
     name: Prepare release metadata
