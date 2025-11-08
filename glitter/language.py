@@ -360,6 +360,7 @@ TONE_STYLES: Dict[str, str] = {
     "warning": "bold yellow",
     "error": "bold red",
     "prompt": "cyan",
+    "debug": "magenta",
 }
 
 
@@ -414,7 +415,7 @@ MESSAGE_TONES: Dict[str, str] = {
     "settings_language_updated": "",
     "settings_device_updated": "",
     "settings_port_updated": "",
-    "settings_port_failed": "",
+    "settings_port_failed": "error",
     "settings_port_invalid": "",
     "settings_port_same": "",
     "settings_encryption_updated": "",
