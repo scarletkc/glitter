@@ -24,7 +24,7 @@ Thumbs.db
 
 # Test & tool artifacts
 .pytest_cache/
-.coverage
+.coverage*
 coverage.xml
 
 # Local overrides

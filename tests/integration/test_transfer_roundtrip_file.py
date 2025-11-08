@@ -58,12 +58,19 @@ def test_transfer_roundtrip_file(tmp_path: Path) -> None:
         # The received file should be placed in dest_dir with the same name
         received = dest_dir / src.name
 
-        # Wait briefly in case the receive thread is finalizing writes
+        # Wait for the receiver thread to create the file
         deadline = time.time() + 2.0
         while not received.exists() and time.time() < deadline:
             time.sleep(0.01)
 
         assert received.exists(), "expected received file to exist"
+
+        # Coverage tracing and other instrumentation can slow I/O, so poll until
+        # the full payload lands on disk rather than assuming it is immediate.
+        size_deadline = time.time() + 2.0
+        while received.stat().st_size < len(payload) and time.time() < size_deadline:
+            time.sleep(0.01)
+
         assert received.stat().st_size == len(payload)
 
         # Hash of the received file must match the sender-reported SHA-256
@@ -71,4 +78,3 @@ def test_transfer_roundtrip_file(tmp_path: Path) -> None:
         assert recv_hash == sent_hash
     finally:
         service.stop()
-
