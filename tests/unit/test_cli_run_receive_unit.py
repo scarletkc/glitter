@@ -133,15 +133,16 @@ def test_cli_main_dispatches_history(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(cli, "build_parser", lambda language: DummyParser())
 
-    def fake_run_history(clear: bool):
+    def fake_run_history(clear: bool, *, quiet: bool = False):
         called["clear"] = clear
+        called["quiet"] = quiet
         return 42
 
     monkeypatch.setattr(cli, "run_history_command", fake_run_history)
 
     exit_code = cli.main(["history", "--clear"])
     assert exit_code == 42
-    assert called["clear"] is True
+    assert called == {"clear": True, "quiet": False}
 
 
 def test_run_receive_quiet_reports_error(monkeypatch: pytest.MonkeyPatch, dummy_setup):
@@ -167,7 +168,7 @@ def test_run_settings_quiet_requires_direct_mode(monkeypatch: pytest.MonkeyPatch
 
     result = cli.run_settings_command(None, None, False, quiet=True)
     assert result == 2
-    assert ui.printed == ["cli_settings_quiet_error"]
+    assert ui.printed == ["cli_quiet_direct_error"]
 
 
 def test_run_settings_quiet_direct_mode_suppresses_output(monkeypatch: pytest.MonkeyPatch, dummy_setup):

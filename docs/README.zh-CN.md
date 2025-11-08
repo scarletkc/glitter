@@ -100,7 +100,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 - **`glitter`** — 启动交互式菜单（查看在线客户端、发送/接收请求、查看历史、配置下载目录/加密/自动接收模式等）。
 - `glitter send [-q|--quiet] <Peer ID/设备名 或 IP[:端口]> <路径>` — 快速发送文件或目录，无需进入菜单。  
 - `glitter peers` — 列出当前发现的局域网客户端。
-- `glitter history [--clear]` — 打印最近的传输记录，可一键清空。
+- `glitter history [--clear] [-q|--quiet]` — 打印最近的传输记录，可一键清空。
 - `glitter settings [--language 代码] [--device-name 名称] [--clear-trust] [-q|--quiet]` — 直接进入设置界面，或一次性完成语言切换、设备改名、清空信任指纹等操作。
 - `glitter update` — 检查最新的 Glitter 版本。
 - `glitter receive [--mode trusted|all] [--dir 路径] [--port 端口] [--no-encryption] [-q|--quiet]` — 在自动接收模式下运行，无需进入菜单。

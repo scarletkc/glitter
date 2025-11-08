@@ -1539,13 +1539,17 @@ def run_peers_command() -> int:
     return exit_code
 
 
-def run_history_command(clear: bool = False) -> int:
+def run_history_command(clear: bool = False, *, quiet: bool = False) -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     app, config, ui, language = initialize_application(debug)
 
+    if quiet and not clear:
+        emit_message(ui, language, "cli_quiet_direct_error", quiet, error=True)
+        return 2
+
     if clear:
         clear_history()
-        show_message(ui, "settings_history_cleared", language)
+        emit_message(ui, language, "settings_history_cleared", quiet)
         return 0
 
     try:
@@ -1607,7 +1611,7 @@ def run_settings_command(
     app_started = False
 
     if quiet and not direct_mode:
-        emit_message(ui, language, "cli_settings_quiet_error", quiet, error=True)
+        emit_message(ui, language, "cli_quiet_direct_error", quiet, error=True)
         return 2
 
     if not direct_mode:
@@ -1957,6 +1961,12 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         action="store_true",
         help=get_message("cli_history_clear_help", language),
     )
+    history_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help=get_message("cli_quiet_help", language),
+    )
 
     settings_parser = subparsers.add_parser(
         "settings",
@@ -2067,7 +2077,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     if getattr(args, "command", None) == "peers":
         return run_peers_command()
     if getattr(args, "command", None) == "history":
-        return run_history_command(clear=bool(getattr(args, "clear", False)))
+        return run_history_command(
+            clear=bool(getattr(args, "clear", False)),
+            quiet=bool(getattr(args, "quiet", False)),
+        )
     if getattr(args, "command", None) == "settings":
         return run_settings_command(
             getattr(args, "language", None),
