@@ -9,6 +9,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/scarletkc/glitter.svg)](https://github.com/scarletkc/glitter/releases)
 [![Downloads](https://img.shields.io/pypi/dm/glitter-cli.svg)](https://pypi.org/project/glitter-cli/)
 [![CI](https://img.shields.io/github/actions/workflow/status/scarletkc/glitter/publish.yml?branch=main)](https://github.com/scarletkc/glitter/actions/workflows/publish.yml)
+[![Codecov](https://img.shields.io/codecov/c/github/scarletkc/glitter/main)](https://codecov.io/github/scarletkc/glitter)
 [![License](https://img.shields.io/github/license/scarletkc/glitter.svg)](https://github.com/scarletkc/glitter/blob/main/LICENSE)
 
 [English](https://github.com/scarletkc/glitter/blob/main/README.md) | **[中文](https://github.com/scarletkc/glitter/blob/main/docs/README.zh-CN.md)**
