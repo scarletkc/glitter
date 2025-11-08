@@ -92,7 +92,7 @@ jobs:
           files: ./coverage.xml
           flags: unittests
           fail_ci_if_error: false
-          verbose: true
+          verbose: false
 
   prepare_release:
     name: Prepare release metadata
