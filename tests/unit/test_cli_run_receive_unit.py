@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import glitter.cli as cli
+import glitter.ui as ui_module
 
 
 class DummyUI:
@@ -38,6 +39,8 @@ class DummyApp:
         self.auto_mode: str | None = None
         self.auto_reject: bool | None = None
         self.set_dir_calls: list[Path] = []
+        self.identity_updates: list[tuple[str, str]] = []
+        self.trust_cleared = False
 
     @property
     def encryption_enabled(self) -> bool:
@@ -68,11 +71,23 @@ class DummyApp:
     def change_transfer_port(self, new_port: int) -> None:
         self.transfer_port = new_port
 
+    def update_identity(self, name: str, language: str) -> None:
+        self.identity_updates.append((name, language))
+
+    def clear_trusted_fingerprints(self) -> bool:
+        self.trust_cleared = True
+        return True
+
 
 @pytest.fixture()
 def dummy_setup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     app = DummyApp(tmp_path)
-    config = SimpleNamespace(auto_accept_trusted="off", transfer_port=app.transfer_port)
+    config = SimpleNamespace(
+        auto_accept_trusted="off",
+        transfer_port=app.transfer_port,
+        language="en",
+        device_name=app.device_name,
+    )
     ui = DummyUI()
     language = "en"
 
@@ -127,3 +142,41 @@ def test_cli_main_dispatches_history(monkeypatch: pytest.MonkeyPatch):
     exit_code = cli.main(["history", "--clear"])
     assert exit_code == 42
     assert called["clear"] is True
+
+
+def test_run_receive_quiet_reports_error(monkeypatch: pytest.MonkeyPatch, dummy_setup):
+    _, _, ui = dummy_setup
+
+    def fake_render_message(key, language, *, tone=None, **kwargs):
+        suffix = ""
+        if kwargs:
+            suffix = " | " + ", ".join(f"{k}={kwargs[k]}" for k in sorted(kwargs))
+        return f"{key}{suffix}"
+
+    monkeypatch.setattr(ui_module, "render_message", fake_render_message)
+
+    result = cli.run_receive_command("invalid", None, None, quiet=True)
+    assert result == 1
+    assert ui.printed == ["receive_mode_invalid | value=invalid"]
+
+
+def test_run_settings_quiet_requires_direct_mode(monkeypatch: pytest.MonkeyPatch, dummy_setup):
+    _, _, ui = dummy_setup
+
+    monkeypatch.setattr(ui_module, "render_message", lambda key, language, *, tone=None, **kwargs: key)
+
+    result = cli.run_settings_command(None, None, False, quiet=True)
+    assert result == 2
+    assert ui.printed == ["cli_settings_quiet_error"]
+
+
+def test_run_settings_quiet_direct_mode_suppresses_output(monkeypatch: pytest.MonkeyPatch, dummy_setup):
+    app, config, ui = dummy_setup
+
+    monkeypatch.setattr(cli, "save_config", lambda cfg: None)
+
+    result = cli.run_settings_command("zh", None, False, quiet=True)
+    assert result == 0
+    assert config.language == "zh"
+    assert app.identity_updates == [(config.device_name, "zh")]
+    assert ui.printed == []

@@ -99,10 +99,12 @@ class ProgressTracker:
         language: str,
         *,
         min_interval: float = 0.1,
+        enabled: bool = True,
     ) -> None:
         self._ui = ui
         self._language = language
         self._min_interval = min_interval
+        self._enabled = enabled
         self._start_time: Optional[float] = None
         self._last_time: Optional[float] = None
         self._last_bytes = 0
@@ -133,7 +135,7 @@ class ProgressTracker:
             and display_total == self._last_total
         ):
             return False
-        if not force and self._last_time is not None:
+        if self._enabled and not force and self._last_time is not None:
             time_delta = now - self._last_time
             if time_delta < self._min_interval:
                 return False
@@ -149,6 +151,11 @@ class ProgressTracker:
             rate = byte_delta / time_delta if time_delta > 0 else 0.0
         if force:
             rate = transferred / max(elapsed, MIN_PROGRESS_RATE_WINDOW)
+        if not self._enabled:
+            self._last_time = now
+            self._last_bytes = transferred
+            self._last_total = display_total
+            return True
         message = render_message(
             "progress_line",
             self._language,

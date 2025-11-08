@@ -193,6 +193,38 @@ def list_peers_cli(ui: TerminalUI, app: GlitterApp, language: str) -> None:
             )
 
 
+def emit_message(
+    ui: TerminalUI,
+    language: str,
+    key: str,
+    quiet: bool,
+    *,
+    error: bool = False,
+    **kwargs: object,
+) -> None:
+    if quiet and not error:
+        return
+    show_message(ui, key, language, **kwargs)
+
+
+def emit_print(
+    ui: TerminalUI,
+    message: Text | str,
+    quiet: bool,
+    *,
+    error: bool = False,
+) -> None:
+    if quiet and not error:
+        return
+    ui.print(message)
+
+
+def emit_blank(ui: TerminalUI, quiet: bool) -> None:
+    if quiet:
+        return
+    ui.blank()
+
+
 class LocalizedArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that uses localized usage and error messages."""
 
@@ -332,19 +364,21 @@ def send_file_cli(
     preselected_peer: Optional[PeerInfo] = None,
     preselected_path: Optional[Path] = None,
     manual_target_info: Optional[dict[str, object]] = None,
+    quiet: bool = False,
 ) -> None:
     peers = app.list_peers()
     default_port = app.transfer_port
     peer_number_lookup = {peer.peer_id: index for index, peer in enumerate(peers, start=1)}
     if preselected_peer is None:
         if peers:
-            list_peers_cli(ui, app, language)
+            if not quiet:
+                list_peers_cli(ui, app, language)
         else:
-            show_message(ui, "no_peers", language)
-            show_message(ui, "manual_target_hint_no_peers", language)
-        ui.blank()
+            emit_message(ui, language, "no_peers", quiet)
+            emit_message(ui, language, "manual_target_hint_no_peers", quiet)
+        emit_blank(ui, quiet)
     else:
-        ui.blank()
+        emit_blank(ui, quiet)
 
     selected_peer: Optional[PeerInfo] = preselected_peer
     manual_selection = False
@@ -420,56 +454,64 @@ def send_file_cli(
 
     peer = selected_peer
     if peer is None:
-        show_message(ui, "operation_cancelled", language)
+        emit_message(ui, language, "operation_cancelled", quiet)
         return
     if not manual_selection and peer.version != __version__:
-        ui.print(
+        emit_print(
+            ui,
             render_message(
                 "version_mismatch_send",
                 language,
                 version=peer.version,
                 current=__version__,
-            )
+            ),
+            quiet,
         )
     if preselected_path is not None:
         file_path = Path(preselected_path).expanduser()
         if not (file_path.exists() and (file_path.is_file() or file_path.is_dir())):
-            show_message(ui, "file_not_found", language)
+            emit_message(ui, language, "file_not_found", quiet, error=True)
             return
     else:
         while True:
             raw_input_path = ui.input(render_message("prompt_file_path", language))
             file_input = raw_input_path.strip().strip('"').strip("'")
             if not file_input:
-                show_message(ui, "operation_cancelled", language)
+                emit_message(ui, language, "operation_cancelled", quiet)
                 return
             file_path = Path(file_input).expanduser()
             if file_path.exists() and (file_path.is_file() or file_path.is_dir()):
                 break
-            show_message(ui, "file_not_found", language)
+            emit_message(ui, language, "file_not_found", quiet, error=True)
     display_name = file_path.name + ("/" if file_path.is_dir() else "")
-    ui.print(
+    emit_print(
+        ui,
         render_message(
             "sending",
             language,
             filename=display_name,
             name=peer.name,
             ip=peer.ip,
-        )
+        ),
+        quiet,
     )
-    show_message(ui, "waiting_recipient", language)
+    emit_message(ui, language, "waiting_recipient", quiet)
     fingerprint = app.identity_fingerprint()
     if fingerprint and app.should_show_local_fingerprint(peer):
-        ui.print(render_message("local_fingerprint", language, fingerprint=fingerprint))
-    show_message(ui, "cancel_hint", language)
-    progress_tracker = ProgressTracker(ui, language)
+        emit_print(
+            ui,
+            render_message("local_fingerprint", language, fingerprint=fingerprint),
+            quiet,
+        )
+    emit_message(ui, language, "cancel_hint", quiet)
+    progress_tracker = ProgressTracker(ui, language, enabled=not quiet)
     handshake_announced = False
     progress_started = False
 
     def report_progress(sent: int, total: int) -> None:
         nonlocal handshake_announced, progress_started
         if not handshake_announced:
-            show_message(ui, "recipient_accepted", language)
+            emit_message(ui, language, "recipient_accepted", quiet)
             handshake_announced = True
         progress_started = True
         display_total = total if total > 0 else sent
@@ -526,7 +568,7 @@ def send_file_cli(
         peer.peer_id = responder_id_obj
 
     if result_holder.get("cancelled"):
-        show_message(ui, "send_cancelled", language)
+        emit_message(ui, language, "send_cancelled", quiet, error=True)
         app.log_history(
             direction="send",
             status="cancelled",
@@ -549,13 +591,16 @@ def send_file_cli(
             actual = mismatch.actual
         else:
             expected = actual = "?"
-        ui.print(
+        emit_print(
+            ui,
             render_message(
                 "send_fingerprint_mismatch",
                 language,
                 expected=expected,
                 actual=actual,
-            )
+            ),
+            quiet,
+            error=True,
         )
         app.log_history(
             direction="send",
@@ -574,7 +619,12 @@ def send_file_cli(
 
     if "exception" in result_holder:
         exc = result_holder["exception"]
-        ui.print(render_message("send_failed", language, error=exc))
+        emit_print(
+            ui,
+            render_message("send_failed", language, error=exc),
+            quiet,
+            error=True,
+        )
         app.log_history(
             direction="send",
             status=f"error: {exc}",
@@ -592,7 +642,7 @@ def send_file_cli(
 
     result = result_holder.get("result")
     if result == "declined":
-        show_message(ui, "send_declined", language)
+        emit_message(ui, language, "send_declined", quiet, error=True)
         app.log_history(
             direction="send",
             status="declined",
@@ -606,7 +656,7 @@ def send_file_cli(
             remote_version=peer.version,
         )
     else:
-        show_message(ui, "send_success", language)
+        emit_message(ui, language, "send_success", quiet)
         app.log_history(
             direction="send",
             status="completed",
@@ -1269,13 +1319,16 @@ def run_cli() -> int:
         app.start()
     except OSError as exc:
         failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
-        ui.print(
+        emit_print(
+            ui,
             render_message(
                 "settings_port_failed",
                 language,
                 port=failure_port,
                 error=exc,
-            )
+            ),
+            quiet,
+            error=True,
         )
         app.stop()
         return 1
@@ -1320,20 +1373,23 @@ def run_cli() -> int:
     return 0
 
 
-def run_send_command(target: str, file_path_arg: str) -> int:
+def run_send_command(target: str, file_path_arg: str, *, quiet: bool = False) -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     app, config, ui, language = initialize_application(debug)
     try:
         app.start()
     except OSError as exc:
         failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
-        ui.print(
+        emit_print(
+            ui,
             render_message(
                 "settings_port_failed",
                 language,
                 port=failure_port,
                 error=exc,
-            )
+            ),
+            quiet,
+            error=True,
         )
         app.stop()
         return 1
@@ -1373,13 +1429,16 @@ def run_send_command(target: str, file_path_arg: str) -> int:
                             option_strings.append(f"[{index_label}] {candidate.name} ({candidate.ip})")
                         else:
                             option_strings.append(f"{candidate.name} ({candidate.ip})")
-                    ui.print(
+                    emit_print(
+                        ui,
                         render_message(
                             "peer_name_ambiguous",
                             language,
                             name=target,
                             options=", ".join(option_strings),
-                        )
+                        ),
+                        quiet,
+                        error=True,
                     )
                     return 1
 
@@ -1387,7 +1446,7 @@ def run_send_command(target: str, file_path_arg: str) -> int:
             default_port = app.transfer_port
             target_info = target_info_prefetched or parse_target_spec(target, default_port)
             if not target_info:
-                show_message(ui, "invalid_peer_target", language)
+                emit_message(ui, language, "invalid_peer_target", quiet, error=True)
                 return 1
 
             normalized_ip = target_info.get("normalized_ip")
@@ -1417,12 +1476,12 @@ def run_send_command(target: str, file_path_arg: str) -> int:
                     manual_info = target_info
 
         if not selected_peer:
-            show_message(ui, "invalid_peer_target", language)
+            emit_message(ui, language, "invalid_peer_target", quiet, error=True)
             return 1
 
         file_path = Path(file_path_arg).expanduser()
         if not (file_path.exists() and (file_path.is_file() or file_path.is_dir())):
-            show_message(ui, "file_not_found", language)
+            emit_message(ui, language, "file_not_found", quiet, error=True)
             return 1
 
         send_file_cli(
@@ -1432,6 +1491,7 @@ def run_send_command(target: str, file_path_arg: str) -> int:
             preselected_peer=selected_peer,
             preselected_path=file_path,
             manual_target_info=manual_info,
+            quiet=quiet,
         )
     finally:
         try:
@@ -1532,13 +1592,23 @@ def run_update_command() -> int:
     return 0
 
 
-def run_settings_command(language_arg: Optional[str], device_name_arg: Optional[str], clear_trust: bool) -> int:
+def run_settings_command(
+    language_arg: Optional[str],
+    device_name_arg: Optional[str],
+    clear_trust: bool,
+    *,
+    quiet: bool = False,
+) -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     app, config, ui, language = initialize_application(debug)
 
     exit_code = 0
-    direct_mode = any([language_arg, device_name_arg, clear_trust])
+    direct_mode = (language_arg is not None) or (device_name_arg is not None) or clear_trust
     app_started = False
+
+    if quiet and not direct_mode:
+        emit_message(ui, language, "cli_settings_quiet_error", quiet, error=True)
+        return 2
 
     if not direct_mode:
         try:
@@ -1546,13 +1616,16 @@ def run_settings_command(language_arg: Optional[str], device_name_arg: Optional[
             app_started = True
         except OSError as exc:
             failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
-            ui.print(
+            emit_print(
+                ui,
                 render_message(
                     "settings_port_failed",
                     language,
                     port=failure_port,
                     error=exc,
-                )
+                ),
+                quiet,
+                error=True,
             )
             app.stop()
             return 1
@@ -1563,47 +1636,61 @@ def run_settings_command(language_arg: Optional[str], device_name_arg: Optional[
                 candidate = language_arg.strip().lower()
                 if candidate not in LANGUAGES:
                     codes = ", ".join(sorted(LANGUAGES))
-                    ui.print(
+                    emit_print(
+                        ui,
                         render_message(
                             "settings_language_invalid",
                             language,
                             value=language_arg,
                             codes=codes,
-                        )
+                        ),
+                        quiet,
+                        error=True,
                     )
                     exit_code = 1
                 elif candidate == (config.language or language):
-                    show_message(ui, "operation_cancelled", language)
+                    emit_message(ui, language, "operation_cancelled", quiet)
                 else:
                     config.language = candidate
                     save_config(config)
                     app.update_identity(config.device_name or app.device_name, candidate)
                     language = candidate
                     lang_name = LANGUAGES.get(candidate, candidate)
-                    ui.print(
+                    emit_print(
+                        ui,
                         render_message(
                             "settings_language_updated",
                             language,
                             language_name=lang_name,
-                        )
+                        ),
+                        quiet,
                     )
             if device_name_arg is not None:
                 new_name = device_name_arg.strip()
                 if not new_name:
-                    ui.print(render_message("settings_device_invalid", language))
+                    emit_print(
+                        ui,
+                        render_message("settings_device_invalid", language),
+                        quiet,
+                        error=True,
+                    )
                     exit_code = 1
                 elif new_name == (config.device_name or app.device_name):
-                    show_message(ui, "operation_cancelled", language)
+                    emit_message(ui, language, "operation_cancelled", quiet)
                 else:
                     config.device_name = new_name
                     save_config(config)
                     app.update_identity(new_name, language)
-                    ui.print(render_message("settings_device_updated", language, name=new_name))
+                    emit_print(
+                        ui,
+                        render_message("settings_device_updated", language, name=new_name),
+                        quiet,
+                    )
             if clear_trust:
                 if app.clear_trusted_fingerprints():
-                    show_message(ui, "settings_trust_cleared", language)
+                    emit_message(ui, language, "settings_trust_cleared", quiet)
                 else:
-                    show_message(ui, "operation_cancelled", language)
+                    emit_message(ui, language, "operation_cancelled", quiet)
         else:
             settings_menu(ui, app, config, language)
     finally:
@@ -1617,7 +1704,14 @@ def run_settings_command(language_arg: Optional[str], device_name_arg: Optional[
     return exit_code
 
 
-def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_arg: Optional[str], *, no_encryption: bool = False) -> int:
+def run_receive_command(
+    mode_arg: Optional[str],
+    dir_arg: Optional[str],
+    port_arg: Optional[str],
+    *,
+    no_encryption: bool = False,
+    quiet: bool = False,
+) -> int:
     debug = os.getenv("GLITTER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
     app, config, ui, language = initialize_application(debug)
 
@@ -1625,12 +1719,12 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
     if mode_arg is not None:
         normalized_mode = normalize_auto_accept_mode(mode_arg)
         if normalized_mode is None:
-            show_message(ui, "receive_mode_invalid", language, value=mode_arg)
+            emit_message(ui, language, "receive_mode_invalid", quiet, error=True, value=mode_arg)
             return 1
         effective_mode = normalized_mode
 
     if effective_mode not in {"trusted", "all"}:
-        show_message(ui, "receive_mode_off_disabled", language)
+        emit_message(ui, language, "receive_mode_off_disabled", quiet, error=True)
         return 1
 
     temp_dir: Optional[Path] = None
@@ -1640,12 +1734,22 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
             if not candidate.is_absolute():
                 candidate = (Path.cwd() / candidate).resolve()
         except Exception as exc:  # noqa: BLE001
-            ui.print(render_message("receive_dir_error", language, error=exc))
+            emit_print(
+                ui,
+                render_message("receive_dir_error", language, error=exc),
+                quiet,
+                error=True,
+            )
             return 1
         try:
             candidate.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            ui.print(render_message("receive_dir_error", language, error=exc))
+            emit_print(
+                ui,
+                render_message("receive_dir_error", language, error=exc),
+                quiet,
+                error=True,
+            )
             return 1
         temp_dir = candidate
 
@@ -1656,21 +1760,24 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
         try:
             desired_port = int(port_arg)
         except ValueError:
-            show_message(ui, "settings_port_invalid", language)
+            emit_message(ui, language, "settings_port_invalid", quiet, error=True)
             return 1
         try:
             app.change_transfer_port(desired_port)
         except ValueError:
-            show_message(ui, "settings_port_invalid", language)
+            emit_message(ui, language, "settings_port_invalid", quiet, error=True)
             return 1
         except OSError as exc:
-            ui.print(
+            emit_print(
+                ui,
                 render_message(
                     "settings_port_failed",
                     language,
                     port=desired_port,
                     error=exc,
-                )
+                ),
+                quiet,
+                error=True,
             )
             return 1
 
@@ -1681,30 +1788,46 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
     previous_encryption_state = app.encryption_enabled
     if no_encryption:
         app.set_encryption_enabled(False)
-        ui.print(render_message("receive_encryption_disabled", language))
+        emit_print(
+            ui,
+            render_message("receive_encryption_disabled", language),
+            quiet,
+        )
 
     if effective_mode == "all":
-        ui.print(render_message("settings_auto_accept_all_warning", language))
+        emit_print(
+            ui,
+            render_message("settings_auto_accept_all_warning", language),
+            quiet,
+        )
 
     try:
         app.start()
     except OSError as exc:
         failure_port = config.transfer_port or DEFAULT_TRANSFER_PORT
-        ui.print(
+        emit_print(
+            ui,
             render_message(
                 "settings_port_failed",
                 language,
                 port=failure_port,
                 error=exc,
-            )
+            ),
+            quiet,
+            error=True,
         )
         app.stop()
         return 1
 
-    ui.print(render_message("receive_dir_set", language, path=str(app.default_download_dir)))
+    emit_print(
+        ui,
+        render_message("receive_dir_set", language, path=str(app.default_download_dir)),
+        quiet,
+    )
 
     local_ips = ", ".join(local_network_addresses())
-    ui.print(
+    emit_print(
+        ui,
         render_message(
             "receive_waiting",
             language,
@@ -1712,15 +1835,16 @@ def run_receive_command(mode_arg: Optional[str], dir_arg: Optional[str], port_ar
             device=app.device_name,
             port=app.transfer_port,
             ips=local_ips,
-        )
+        ),
+        quiet,
     )
 
     try:
         while True:
             time.sleep(0.5)
     except KeyboardInterrupt:
-        ui.blank()
-        show_message(ui, "receive_shutdown", language)
+        emit_blank(ui, quiet)
+        emit_message(ui, language, "receive_shutdown", quiet)
     finally:
         if no_encryption:
             app.set_encryption_enabled(previous_encryption_state)
@@ -1790,6 +1914,12 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         "path",
         help=get_message("cli_send_path_help", language),
     )
+    send_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help=get_message("cli_quiet_help", language),
+    )
 
     peers_parser = subparsers.add_parser(
         "peers",
@@ -1856,6 +1986,12 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         action="store_true",
         help=get_message("cli_settings_clear_trust_help", language),
     )
+    settings_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help=get_message("cli_quiet_help", language),
+    )
 
     update_parser = subparsers.add_parser(
         "update",
@@ -1905,6 +2041,12 @@ def build_parser(language: str) -> argparse.ArgumentParser:
         action="store_true",
         help=get_message("cli_receive_no_encryption_help", language),
     )
+    receive_parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help=get_message("cli_quiet_help", language),
+    )
     return parser
 
 
@@ -1917,7 +2059,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser(language)
     args = parser.parse_args(arguments)
     if getattr(args, "command", None) == "send":
-        return run_send_command(args.target, args.path)
+        return run_send_command(
+            args.target,
+            args.path,
+            quiet=bool(getattr(args, "quiet", False)),
+        )
     if getattr(args, "command", None) == "peers":
         return run_peers_command()
     if getattr(args, "command", None) == "history":
@@ -1927,6 +2073,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             getattr(args, "language", None),
             getattr(args, "device_name", None),
             bool(getattr(args, "clear_trust", False)),
+            quiet=bool(getattr(args, "quiet", False)),
         )
     if getattr(args, "command", None) == "update":
         return run_update_command()
@@ -1936,6 +2083,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             getattr(args, "dir", None),
             getattr(args, "port", None),
             no_encryption=getattr(args, "no_encryption", False),
+            quiet=bool(getattr(args, "quiet", False)),
         )
     return run_cli()
 

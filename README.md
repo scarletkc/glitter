@@ -98,12 +98,12 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
 ## Usage
 
 - **`glitter`** — Launch the interactive menu (list peers, send/receive requests, view history, configure download/encryption/auto-accept modes, etc.).
-- `glitter send <peer|IP[:port]> <path>` — Send a file or directory directly without the menu (peer ID, device name, or manual IP).  
+- `glitter send [-q|--quiet] <peer|IP[:port]> <path>` — Send a file or directory directly without the menu (peer ID, device name, or manual IP).  
 - `glitter peers` — List peers currently discovered on the LAN.
 - `glitter history [--clear]` — Print recent transfer history records, or clear them instantly.
-- `glitter settings [--language CODE] [--device-name NAME] [--clear-trust]` — Jump straight into the settings menu or apply specific changes (language, device name, trust reset) in one go.
+- `glitter settings [--language CODE] [--device-name NAME] [--clear-trust] [-q|--quiet]` — Jump straight into the settings menu or apply specific changes (language, device name, trust reset) in one go.
 - `glitter update` — Check the latest available Glitter version.
-- `glitter receive [--mode trusted|all] [--dir PATH] [--port PORT] [--no-encryption]` — Run in auto-receive mode (trusted/all) without opening the menu.
+- `glitter receive [--mode trusted|all] [--dir PATH] [--port PORT] [--no-encryption] [-q|--quiet]` — Run in auto-receive mode (trusted/all) without opening the menu.
 
 Tip: once the initial setup is complete, you can keep Glitter running headlessly with your favourite process manager (`systemd`, `pm2`, ...). 
 
