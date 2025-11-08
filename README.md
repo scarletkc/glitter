@@ -16,7 +16,7 @@
 
 Glitter is a cross‑platform, terminal‑based tool for sending files over a local network. It discovers peers automatically, confirms transfers on the receiver, and supports English/Chinese UIs.
 
-- OS support: Linux, macOS, Windows
+- OS support(x86/ARM): Linux, macOS, Windows
 - Bilingual UI: English, 中文 (switchable in settings)
 - Peer discovery via UDP broadcast + smart replies (or manual IP entry)
 - Encrypted transfer (DH key exchange + stream cipher)
@@ -33,7 +33,7 @@ Glitter provides a **simple, terminal-based** alternative to GUI tools and compl
 
 | Tool | Pros | Cons | Glitter Advantage |
 |------|------|------|-------------------|
-| **LocalSend** | Beautiful GUI, cross-platform | Requires GUI environment, ~100MB+ install | **CLI-first**: works via SSH, lightweight (~1MB), scriptable |
+| **LocalSend** | Beautiful GUI, cross-platform | Requires GUI environment, ~100MB+ install | **CLI-first**: works via SSH, lightweight (<1MB), scriptable |
 | **Magic Wormhole** | Simple one-time codes | Requires relay server, single-file only | **LAN-direct**: no internet needed, auto-discovery, no codes to type |
 | **SFTP/SCP** | Universal, encrypted | Needs SSH server setup, manual IP entry | **Zero-config**: auto-discovers peers, no server setup |
 | **rsync** | Powerful sync engine | Complex syntax, requires remote shell access | **Interactive**: menu-driven, progress bars, history tracking |
@@ -56,7 +56,7 @@ On first run, Glitter asks for language and device name and saves them. Next run
 
 ### Run Glitter instantly with [uv](https://docs.astral.sh/uv/)
 ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl -LsSf https://astral.sh/uv/install.sh | sh  # Debian/Ubuntu
   uv run glitter
 ```
 
@@ -87,7 +87,7 @@ Requirements: install [deps](https://github.com/scarletkc/glitter/blob/main/requ
   - `git clone https://github.com/scarletkc/glitter.git`
   - `pip install -r requirements.txt`
   - `python3 -m glitter`
-   - `git pull` # to update
+    - `git pull` # to update
 
 </details>
 

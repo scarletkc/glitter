@@ -16,7 +16,7 @@
 
 Glitter 是一个跨平台、终端界面的局域网文件互传工具，自动发现同网段设备，接收方需要确认后开始传输，并支持中英文界面切换。
 
-- 支持系统：Linux、macOS、Windows
+- 支持系统 (x86/ARM) ：Linux、macOS、Windows
 - 双语界面：English / 中文（可在设置中切换）
 - UDP 广播 + 智能回复的同伴发现（或手动输入 IP 地址）
 - 传输加密（DH 密钥交换 + 流加密）
@@ -33,7 +33,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
 
 | 工具 | 优点 | 缺点 | Glitter 的优势 |
 |------|------|------|----------------|
-| **LocalSend** | 界面美观，跨平台 | 需要 GUI 环境，安装包 ~100MB+ | **命令行优先**：可通过 SSH 使用，轻量 (~1MB)，可脚本化 |
+| **LocalSend** | 界面美观，跨平台 | 需要 GUI 环境，安装包 ~100MB+ | **命令行优先**：可通过 SSH 使用，轻量 (<1MB)，可脚本化 |
 | **Magic Wormhole** | 简单的一次性代码 | 依赖中继服务器，仅支持单文件 | **局域网直连**：无需互联网，自动发现，无需输入代码 |
 | **SFTP/SCP** | 通用，加密传输 | 需要配置 SSH 服务器，手动输入 IP | **零配置**：自动发现设备，无需架设服务器 |
 | **rsync** | 强大的同步引擎 | 语法复杂，需要远程 shell 访问 | **交互式**：菜单驱动，进度条，历史记录 |
@@ -56,7 +56,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
   
 ### 通过 [uv](https://docs.astral.sh/uv/) 一键运行
 ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl -LsSf https://astral.sh/uv/install.sh | sh  # Debian/Ubuntu
   uv run glitter
 ```
 
@@ -87,7 +87,7 @@ Glitter 提供了一个**简洁、基于终端**的替代方案，相比 GUI 工
   - `git clone https://github.com/scarletkc/glitter.git`
   - `pip install -r requirements.txt`
   - `python3 -m glitter`
-   - `git pull` # 更新
+    - `git pull` # 更新
   
 </details>
 
