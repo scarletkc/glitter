@@ -84,10 +84,12 @@ jobs:
         run: |
           python -m pytest -q --cov=glitter --cov-report=xml
 
+      # CODECOV_TOKEN is configured in repository secrets
       - name: Upload coverage to Codecov
         if: steps.detect.outputs.changed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
           fail_ci_if_error: false
