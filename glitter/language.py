@@ -70,7 +70,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_port_help": "Temporary transfer port for this session",
         "cli_receive_no_encryption_help": "Temporarily disable encryption for this receive session",
         "cli_path_warning": "Tip: The `glitter` command is not on PATH.",
-        "firewall_probe_warning": "! Unable to verify TCP {tcp_port} or UDP {udp_port} reachability on this device. The local firewall may be blocking Glitter ports.",
+        "firewall_probe_warning": "! Unable to verify TCP {tcp_port} or UDP {udp_port} reachability on this device. The local firewall may be blocking Glitter ports or the port is already in use.",
         "firewall_probe_details": "Debug: Details: {details}",
         "menu_header": "Available actions:",
         "menu_options": "[1] List peers  [2] Send file  [3] Incoming requests  [4] Check updates  [5] History  [6] Settings  [7] Quit",
@@ -234,7 +234,7 @@ MESSAGES: Dict[str, Dict[str, str]] = {
         "cli_receive_port_help": "本次会话使用的临时传输端口",
         "cli_receive_no_encryption_help": "仅针对本次会话临时关闭加密",
         "cli_path_warning": "提示：系统环境变量 PATH 中未找到 `glitter` 命令！",
-        "firewall_probe_warning": "! 无法确认本机 TCP {tcp_port} 或 UDP {udp_port} 可访问，可能被防火墙阻止，请放行后再试。",
+        "firewall_probe_warning": "! 无法确认本机 TCP {tcp_port} 或 UDP {udp_port} 可访问，可能被防火墙阻止或端口被占用，请放行/释放端口后再试。",
         "firewall_probe_details": "Debug: 详情：{details}",
         "menu_header": "可用操作：",
         "menu_options": "[1] 查看在线客户端  [2] 发送文件  [3] 待处理请求  [4] 查看更新  [5] 传输记录  [6] 设置  [7] 退出",
@@ -370,7 +370,7 @@ TONE_STYLES: Dict[str, str] = {
 
 MESSAGE_TONES: Dict[str, str] = {
     "welcome": "",
-    "firewall_probe_warning": "warning",
+    "firewall_probe_warning": "error",
     "firewall_probe_details": "debug",
     "cli_path_warning": "warning",
     "icon": "icon",
