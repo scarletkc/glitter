@@ -44,3 +44,10 @@ def test_update_identity_and_get_peers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert service.device_name == "New"
     assert service.language == "zh"
     assert service.transfer_port == 9999
+
+
+def test_reply_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = DiscoveryService("peer", "Laptop", "en", transfer_port=45846)
+    service._last_reply["remote"] = 0.0
+    monkeypatch.setattr("glitter.discovery.time", lambda: service.reply_cooldown - 0.1)
+    assert "remote" in service._last_reply
