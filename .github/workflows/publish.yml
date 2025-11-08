@@ -88,6 +88,7 @@ jobs:
         if: steps.detect.outputs.changed == 'true'
         uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
           fail_ci_if_error: false
